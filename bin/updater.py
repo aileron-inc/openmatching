@@ -21,6 +21,7 @@ def update_from_github(repo_owner="aileron-inc", repo_name="openmatching", branc
     # 更新対象ファイル
     files_to_update = [
         "bin/bot.py",
+        "bin/env.py",
         "bin/job.py",
         "bin/company.py",
         "bin/download.py",

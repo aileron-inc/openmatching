@@ -722,6 +722,7 @@ def handle_mention(event, say, logger, client):
                 f"• `{bot_mention} job J-XXXXXXX` - 求人に合う候補者をレコメンド\n"
                 f"• `{bot_mention} company SaaS系スタートアップ` - 検索クエリで企業を探索\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
+                f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードをリロード\n\n"
                 "*企業探索の例:*\n"
                 f"• `{bot_mention} company リモートワークOK`\n"
@@ -957,6 +958,79 @@ def handle_mention(event, say, logger, client):
             text=response_text
         )
     
+    elif command == 'test':
+        # OpenCode疎通確認
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text="🧪 OpenCode疎通テストを開始します..."
+        )
+        
+        try:
+            project_dir = Path(__file__).parent.parent.resolve()
+            
+            # 簡単なテストプロンプト
+            test_prompt = "1から5までの数字をカンマ区切りで出力してください。他の説明は不要です。"
+            
+            # OpenCodeコマンド構築
+            opencode_cmd = ['opencode', 'run']
+            
+            # GLM 4.7 を使用（無償モデル）
+            opencode_cmd.extend(['--model', 'glm-4-flash'])
+            
+            opencode_cmd.append(test_prompt)
+            
+            print(f"🧪 OpenCode テスト実行: {' '.join(opencode_cmd)}")
+            
+            # 実行（タイムアウト30秒）
+            result = subprocess.run(
+                opencode_cmd,
+                cwd=str(project_dir),
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                # 成功
+                output = result.stdout.strip()
+                client.chat_postMessage(
+                    channel=channel_id,
+                    thread_ts=thread_ts,
+                    text=(
+                        f"✅ OpenCode疎通テスト成功\n\n"
+                        f"**モデル:** GLM 4.7 (glm-4-flash)\n"
+                        f"**プロンプト:** {test_prompt}\n"
+                        f"**結果:**\n```\n{output[:500]}\n```\n\n"
+                        f"OpenCodeは正常に動作しています！"
+                    )
+                )
+            else:
+                # 失敗
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                client.chat_postMessage(
+                    channel=channel_id,
+                    thread_ts=thread_ts,
+                    text=(
+                        f"❌ OpenCode疎通テスト失敗\n\n"
+                        f"**エラー内容:**\n```\n{error_msg[:500]}\n```\n\n"
+                        f"OpenCodeの設定を確認してください"
+                    )
+                )
+        
+        except subprocess.TimeoutExpired:
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text="⏱️ OpenCodeテストがタイムアウトしました（30秒超過）"
+            )
+        except Exception as e:
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=f"❌ テスト実行エラー: {e}"
+            )
+    
     else:
         # 不明なコマンド
         bot_mention = f"@{BOT_NAME}" if BOT_NAME else "@bot"
@@ -969,6 +1043,7 @@ def handle_mention(event, say, logger, client):
                 f"• `{bot_mention} job J-XXXXXXX` - 求人レコメンド\n"
                 f"• `{bot_mention} company <検索クエリ>` - 企業探索\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
+                f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードリロード\n\n"
                 "*企業探索の例:*\n"
                 f"• `{bot_mention} company SaaS系スタートアップ`\n"
@@ -1039,6 +1114,7 @@ if __name__ == "__main__":
     print(f"   @{BOT_NAME} job J-0000023845              # 求人レコメンド")
     print(f"   @{BOT_NAME} company SaaS系スタートアップ  # 企業探索")
     print(f"   @{BOT_NAME} ping                          # ヘルスチェック")
+    print(f"   @{BOT_NAME} test                          # OpenCode疎通テスト")
     print(f"   @{BOT_NAME} reload                        # コードリロード")
     print()
     print("🔄 ジョブキュー: 有効（並列実行を防止し、1件ずつ順番に処理）")

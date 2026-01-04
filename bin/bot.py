@@ -967,47 +967,37 @@ def handle_mention(event, say, logger, client):
         )
         
         try:
-            project_dir = Path(__file__).parent.parent.resolve()
+            # env.py の test_opencode() を使用
+            import sys
+            env_path = Path(__file__).parent / 'env.py'
+            sys.path.insert(0, str(env_path.parent))
             
-            # 簡単なテストプロンプト
-            test_prompt = "1から5までの数字をカンマ区切りで出力してください。他の説明は不要です。"
+            from env import test_opencode
             
-            # OpenCodeコマンド構築
-            opencode_cmd = ['opencode', 'run']
+            result = test_opencode()
             
-            # GLM 4.7 を使用（無償モデル）
-            opencode_cmd.extend(['--model', 'glm-4-flash'])
-            
-            opencode_cmd.append(test_prompt)
-            
-            print(f"🧪 OpenCode テスト実行: {' '.join(opencode_cmd)}")
-            
-            # 実行（タイムアウト30秒）
-            result = subprocess.run(
-                opencode_cmd,
-                cwd=str(project_dir),
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
+            if result['status'] == 'ok':
                 # 成功
-                output = result.stdout.strip()
                 client.chat_postMessage(
                     channel=channel_id,
                     thread_ts=thread_ts,
                     text=(
                         f"✅ OpenCode疎通テスト成功\n\n"
-                        f"**モデル:** GLM 4.7 (glm-4-flash)\n"
-                        f"**プロンプト:** {test_prompt}\n"
-                        f"**結果:**\n```\n{output[:500]}\n```\n\n"
+                        f"**モデル:** {result['model']}\n"
+                        f"**プロンプト:** {result['prompt']}\n"
+                        f"**結果:**\n```\n{result['output'][:500]}\n```\n\n"
                         f"OpenCodeは正常に動作しています！"
                     )
                 )
+            elif result['status'] == 'timeout':
+                client.chat_postMessage(
+                    channel=channel_id,
+                    thread_ts=thread_ts,
+                    text="⏱️ OpenCodeテストがタイムアウトしました（30秒超過）"
+                )
             else:
-                # 失敗
-                error_msg = result.stderr.strip() or result.stdout.strip()
+                # エラー
+                error_msg = result.get('error', '不明なエラー')
                 client.chat_postMessage(
                     channel=channel_id,
                     thread_ts=thread_ts,
@@ -1018,12 +1008,6 @@ def handle_mention(event, say, logger, client):
                     )
                 )
         
-        except subprocess.TimeoutExpired:
-            client.chat_postMessage(
-                channel=channel_id,
-                thread_ts=thread_ts,
-                text="⏱️ OpenCodeテストがタイムアウトしました（30秒超過）"
-            )
         except Exception as e:
             client.chat_postMessage(
                 channel=channel_id,

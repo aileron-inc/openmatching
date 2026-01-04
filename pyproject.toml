@@ -1,0 +1,19 @@
+[project]
+name = "opencode-matching"
+version = "0.1.0"
+description = "Simple OpenCode AI matching system"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=2.14.0",
+    "pandas>=2.0.0",
+    "requests>=2.31.0",
+    "schedule>=1.2.0",
+    "simple-salesforce>=1.12.0",
+]
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []

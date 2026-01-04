@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenMatching Slack Bot with Scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=openmatching
+WorkingDirectory=/opt/openmatching
+Environment="PATH=/home/openmatching/.opencode/bin:/home/openmatching/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile=/opt/openmatching/.env
+ExecStart=/home/openmatching/.local/bin/uv run bin/bot.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# ログ設定
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openmatching-bot
+
+[Install]
+WantedBy=multi-user.target

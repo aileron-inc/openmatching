@@ -1013,7 +1013,6 @@ if __name__ == "__main__":
     print()
     
     # Bot認証確認
-    global BOT_NAME
     try:
         auth_response = app.client.auth_test()
         BOT_NAME = auth_response['user']

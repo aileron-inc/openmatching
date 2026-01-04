@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = []
+# dependencies = ["python-dotenv"]
 # ///
 """
 Environment Check Utility
@@ -16,6 +16,10 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from dotenv import load_dotenv
+
+# .env を読み込む
+load_dotenv()
 
 
 def check_env_vars():

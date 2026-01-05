@@ -43,6 +43,233 @@ ADMIN_CHANNEL = os.environ.get("SLACK_CH")
 # ボット名（起動時に取得）
 BOT_NAME = None
 
+def process_job_search(search_query, user_id, say, client, channel_id, thread_ts, count=10):
+    """求人検索処理（キーワード型）"""
+    start_time = time.time()
+    print(f"\n{'='*60}")
+    print(f"💼 求人検索処理開始")
+    print(f"{'='*60}")
+    print(f"   検索クエリ: {search_query}")
+    print(f"   取得件数: {count}件")
+    print(f"   依頼者: {user_id}")
+    print(f"   スレッド: {thread_ts}")
+    print(f"   開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # 処理開始メッセージ（スレッド内に投稿）
+    status_msg = client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=thread_ts,
+        text=(
+            f"💼 求人検索を開始しました\n\n"
+            f"検索クエリ: `{search_query}`\n"
+            f"⏰ 開始時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
+            f"処理には数分かかります。このスレッドで進捗をお知らせしますね"
+        )
+    )
+    
+    status_ts = status_msg['ts']
+    
+    try:
+        # スクリプトのパスを取得
+        project_dir = Path(__file__).parent.parent.resolve()
+        job_script = project_dir / "bin" / "job.py"
+        
+        print(f"📝 スクリプト実行中: {job_script}")
+        print(f"{'='*60}")
+        print(f"OpenCode 実行ログ:")
+        print(f"{'='*60}\n")
+        
+        # 検索実行（標準出力を直接表示）
+        result = subprocess.run(
+            ["uv", "run", str(job_script), search_query, str(count)],
+            cwd=str(project_dir),
+            timeout=600,  # 10分でタイムアウト
+        )
+        
+        print(f"\n{'='*60}")
+        print(f"OpenCode 実行完了")
+        print(f"{'='*60}")
+        
+        elapsed_time = time.time() - start_time
+        elapsed_str = f"{int(elapsed_time // 60)}分{int(elapsed_time % 60)}秒"
+        
+        print(f"⏱️  処理時間: {elapsed_str}")
+        
+        if result.returncode != 0:
+            print(f"❌ エラー発生")
+            # メッセージ更新
+            client.chat_update(
+                channel=channel_id,
+                ts=status_ts,
+                text=(
+                    f"❌ 求人検索でエラーが発生しました\n\n"
+                    f"検索クエリ: `{search_query}`\n"
+                    f"⏱️ 処理時間: {elapsed_str}\n\n"
+                    f"申し訳ございません。もう一度お試しください"
+                )
+            )
+            return
+        
+        # 成功 → 結果ファイルを探してSlackに投稿
+        print(f"✅ 求人検索処理完了")
+        print(f"📤 Slackへの結果投稿を開始...")
+        
+        # 最新の結果ファイルを探す
+        results_dir = project_dir / "workspace" / "output"
+        summary_files = sorted(results_dir.glob("jobs_*_summary.md"), reverse=True)
+        csv_files = sorted(results_dir.glob("jobs_*.csv"), reverse=True)
+        
+        if summary_files and csv_files:
+            latest_summary = summary_files[0]
+            latest_csv = csv_files[0]
+            
+            print(f"📄 サマリーファイル: {latest_summary}")
+            print(f"📊 CSVファイル: {latest_csv}")
+            
+            try:
+                # サマリー読み込み
+                with open(latest_summary, 'r', encoding='utf-8') as f:
+                    summary_text = f.read()
+                
+                # CSV行数をカウント（ヘッダー除く）
+                with open(latest_csv, 'r', encoding='utf-8') as f:
+                    job_count = sum(1 for line in f) - 1
+                
+                canvas_title = f"【求人検索】{search_query} - 結果"
+                
+                # Canvas作成（スレッド内に投稿）
+                print(f"📝 Canvas作成中: {canvas_title}")
+                canvas_response = client.canvases_create(
+                    title=canvas_title,
+                    document_content={
+                        "type": "markdown",
+                        "markdown": summary_text
+                    }
+                )
+                
+                canvas_id = canvas_response['canvas_id']
+                print(f"✅ Canvas作成完了: {canvas_id}")
+                
+                # チャンネルに共有（アクセス権付与）
+                client.canvases_access_set(
+                    canvas_id=canvas_id,
+                    access_level="read",
+                    channel_ids=[channel_id]
+                )
+                
+                # Canvas URLを構築
+                auth = client.auth_test()
+                team_id = auth['team_id']
+                workspace_url = auth['url']
+                canvas_url = f"{workspace_url}docs/{team_id}/{canvas_id}"
+                
+                print(f"📊 Canvas URL: {canvas_url}")
+                
+                # メッセージ更新（完了）
+                client.chat_update(
+                    channel=channel_id,
+                    ts=status_ts,
+                    text=(
+                        f"✅ 求人検索が完了しました\n\n"
+                        f"検索クエリ: `{search_query}`\n"
+                        f"見つかった求人: *{job_count}件*\n"
+                        f"⏱️ 処理時間: {elapsed_str}\n"
+                        f"⏰ 完了時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                        f"📄 詳細はCanvasとCSVをご確認ください\n"
+                        f"{canvas_url}"
+                    )
+                )
+                
+                # CSVファイルをアップロード（スレッド内）
+                print(f"📤 CSVファイルアップロード中...")
+                client.files_upload_v2(
+                    channel=channel_id,
+                    thread_ts=thread_ts,
+                    file=str(latest_csv),
+                    title=f"求人検索結果 ({job_count}件)",
+                    initial_comment=f"📊 全{job_count}件の詳細データ（CSV形式）"
+                )
+                
+                print(f"✅ Slack投稿完了")
+                
+            except Exception as post_error:
+                print(f"⚠️  Slack投稿でエラー: {post_error}")
+                import traceback
+                traceback.print_exc()
+                
+                # メッセージ更新（警告）
+                client.chat_update(
+                    channel=channel_id,
+                    ts=status_ts,
+                    text=(
+                        f"⚠️ 処理は完了しましたが、結果の投稿でエラーが発生しました\n\n"
+                        f"検索クエリ: `{search_query}`\n"
+                        f"⏱️ 処理時間: {elapsed_str}\n\n"
+                        f"以下のファイルを手動でご確認ください:\n"
+                        f"サマリー: `{latest_summary.name}`\n"
+                        f"CSV: `{latest_csv.name}`"
+                    )
+                )
+        else:
+            print(f"⚠️  結果ファイルが見つかりません")
+            # メッセージ更新（警告）
+            client.chat_update(
+                channel=channel_id,
+                ts=status_ts,
+                text=(
+                    f"⚠️ 処理は完了しましたが、結果ファイルが見つかりませんでした\n\n"
+                    f"検索クエリ: `{search_query}`\n"
+                    f"⏱️ 処理時間: {elapsed_str}\n\n"
+                    f"お手数ですが、もう一度お試しください"
+                )
+            )
+        
+    except subprocess.TimeoutExpired:
+        elapsed_time = time.time() - start_time
+        elapsed_str = f"{int(elapsed_time // 60)}分{int(elapsed_time % 60)}秒"
+        print(f"⏱️  タイムアウト（経過時間: {elapsed_str}）")
+        client.chat_update(
+            channel=channel_id,
+            ts=status_ts,
+            text=(
+                f"⏱️ タイムアウト: 処理に10分以上かかっています\n\n"
+                f"検索クエリ: `{search_query}`\n"
+                f"経過時間: {elapsed_str}\n\n"
+                f"申し訳ございません。検索条件を絞ってもう一度お試しください"
+            )
+        )
+    except FileNotFoundError as e:
+        elapsed_time = time.time() - start_time
+        print(f"❌ ファイルエラー: {e}")
+        client.chat_update(
+            channel=channel_id,
+            ts=status_ts,
+            text=(
+                f"❌ システムエラーが発生しました\n\n"
+                f"スクリプトが見つかりません\n"
+                f"管理者にお問い合わせください"
+            )
+        )
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        print(f"❌ 予期しないエラー: {e}")
+        
+        # 詳細なスタックトレース
+        import traceback
+        traceback.print_exc()
+        
+        client.chat_update(
+            channel=channel_id,
+            ts=status_ts,
+            text=(
+                f"❌ 予期しないエラーが発生しました\n\n"
+                f"申し訳ございません。もう一度お試しいただくか、\n"
+                f"管理者にお問い合わせください"
+            )
+        )
+    finally:
+        print(f"{'='*60}\n")
+
 def process_company_search(search_query, user_id, say, client, channel_id, thread_ts, count=10):
     """企業探索処理（検索クエリ型）"""
     start_time = time.time()
@@ -270,11 +497,11 @@ def process_company_search(search_query, user_id, say, client, channel_id, threa
     finally:
         print(f"{'='*60}\n")
 
-def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_ts):
-    """求人レコメンド処理（共通ロジック）"""
+def process_candidate_matching(job_id, user_id, say, client, channel_id, thread_ts):
+    """候補者マッチング処理（求人IDから候補者を探す）"""
     start_time = time.time()
     print(f"\n{'='*60}")
-    print(f"🚀 求人レコメンド処理開始")
+    print(f"👥 候補者マッチング処理開始")
     print(f"{'='*60}")
     print(f"   求人ID: {job_id}")
     print(f"   依頼者: {user_id}")
@@ -286,7 +513,7 @@ def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_
         channel=channel_id,
         thread_ts=thread_ts,
         text=(
-            f"🚀 求人レコメンドを開始しました\n\n"
+            f"👥 候補者マッチングを開始しました\n\n"
             f"求人ID: `{job_id}`\n"
             f"⏰ 開始時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
             f"処理には数分かかります。このスレッドで進捗をお知らせしますね"
@@ -296,21 +523,20 @@ def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_
     status_ts = status_msg['ts']
     
     try:
-        # スクリプトのパスを取得（bot.pyと同じディレクトリ）
+        # スクリプトのパスを取得
         project_dir = Path(__file__).parent.parent.resolve()
-        job_script = project_dir / "bin" / "job.py"
+        candidate_script = project_dir / "bin" / "candidate.py"
         
-        print(f"📝 スクリプト実行中: {job_script}")
+        print(f"📝 スクリプト実行中: {candidate_script}")
         print(f"{'='*60}")
         print(f"OpenCode 実行ログ:")
         print(f"{'='*60}\n")
         
         # マッチング実行（標準出力を直接表示）
         result = subprocess.run(
-            ["uv", "run", str(job_script), job_id],
+            ["uv", "run", str(candidate_script), job_id],
             cwd=str(project_dir),
             timeout=600,  # 10分でタイムアウト
-            # capture_output=False で標準出力をターミナルに表示
         )
         
         print(f"\n{'='*60}")
@@ -330,7 +556,7 @@ def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_
                 channel=channel_id,
                 ts=status_ts,
                 text=(
-                    f"❌ 求人レコメンドでエラーが発生しました\n\n"
+                    f"❌ 候補者マッチングでエラーが発生しました\n\n"
                     f"求人ID: `{job_id}`\n"
                     f"⏱️ 処理時間: {elapsed_str}\n\n"
                     f"申し訳ございません。求人IDをご確認の上、もう一度お試しください"
@@ -406,7 +632,7 @@ def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_
                     channel=channel_id,
                     ts=status_ts,
                     text=(
-                        f"✅ 求人レコメンドが完了しました\n\n"
+                        f"✅ 候補者マッチングが完了しました\n\n"
                         f"求人ID: `{job_id}`\n"
                         f"職種: {job_title}\n"
                         f"見つかった候補者: *{candidate_count}名*\n"
@@ -423,7 +649,7 @@ def process_job_recommendation(job_id, user_id, say, client, channel_id, thread_
                     channel=channel_id,
                     thread_ts=thread_ts,
                     file=str(latest_csv),
-                    title=f"求人レコメンド結果 ({candidate_count}名)",
+                    title=f"候補者マッチング結果 ({candidate_count}名)",
                     initial_comment=f"📊 全{candidate_count}名の詳細データ（CSV形式）"
                 )
                 
@@ -717,17 +943,18 @@ def handle_mention(event, say, logger, client):
             channel=channel_id,
             thread_ts=thread_ts,
             text=(
-                "こんにちは！レコメンド・探索機能が使えます 👋\n\n"
+                "こんにちは！マッチング・検索機能が使えます 👋\n\n"
                 "*使い方:*\n"
-                f"• `{bot_mention} job J-XXXXXXX` - 求人に合う候補者をレコメンド\n"
-                f"• `{bot_mention} company SaaS系スタートアップ` - 検索クエリで企業を探索\n"
+                f"• `{bot_mention} candidate J-XXXXXXX` - 求人IDから候補者を探す\n"
+                f"• `{bot_mention} job Pythonエンジニア` - キーワードから求人を探す\n"
+                f"• `{bot_mention} company SaaS系スタートアップ` - キーワードから企業を探す\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
                 f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードをリロード\n\n"
-                "*企業探索の例:*\n"
-                f"• `{bot_mention} company リモートワークOK`\n"
-                f"• `{bot_mention} company フィンテック 金融`\n"
-                f"• `{bot_mention} company AI/ML スタートアップ`\n\n"
+                "*例:*\n"
+                f"• `{bot_mention} candidate J-0000024062`\n"
+                f"• `{bot_mention} job フルリモート`\n"
+                f"• `{bot_mention} company リモートワークOK`\n\n"
                 f"📊 現在のキュー: {queue_size}件待機中"
             )
         )
@@ -736,14 +963,14 @@ def handle_mention(event, say, logger, client):
     command = parts[0].lower()
     print(f"⚡ 実行コマンド: {command}")
     
-    if command == 'job':
-        # 求人レコメンド
+    if command == 'candidate':
+        # 候補者マッチング（求人IDから候補者を探す）
         if len(parts) < 2:
             bot_mention = f"@{BOT_NAME}" if BOT_NAME else "@bot"
             client.chat_postMessage(
                 channel=channel_id,
                 thread_ts=thread_ts,
-                text=f"❌ 求人IDを指定してください\n例: `{bot_mention} job J-0000023845`"
+                text=f"❌ 求人IDを指定してください\n例: `{bot_mention} candidate J-0000023845`"
             )
             return
         
@@ -776,8 +1003,61 @@ def handle_mention(event, say, logger, client):
             )
         
         job_queue.put({
-            'func': process_job_recommendation,
+            'func': process_candidate_matching,
             'args': (job_id, user_id, say, client, channel_id, thread_ts),
+            'kwargs': {}
+        })
+        
+        print(f"✅ ジョブをキューに追加（キュー: {job_queue.qsize()}件）")
+    
+    elif command == 'job':
+        # 求人検索（キーワードから求人を探す）
+        if len(parts) < 2:
+            bot_mention = f"@{BOT_NAME}" if BOT_NAME else "@bot"
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=(
+                    "❌ 検索キーワードを指定してください\n\n"
+                    "例:\n"
+                    f"• `{bot_mention} job Pythonエンジニア`\n"
+                    f"• `{bot_mention} job フルリモート`\n"
+                    f"• `{bot_mention} job データサイエンティスト`"
+                )
+            )
+            return
+        
+        # 検索クエリを抽出（2番目以降の全ての単語を結合）
+        search_query = ' '.join(parts[1:])
+        
+        # まず受付メッセージ（スレッド内に即座に表示）
+        if queue_size > 0:
+            # 他のジョブが処理中
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=(
+                    f"📋 リクエストを受け付けました\n\n"
+                    f"検索クエリ: `{search_query}`\n"
+                    f"⏳ 現在{queue_size}件処理中です\n\n"
+                    f"順番が来たらこのスレッドで通知します"
+                )
+            )
+        else:
+            # すぐに処理開始
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=(
+                    f"📋 リクエストを受け付けました\n\n"
+                    f"検索クエリ: `{search_query}`\n"
+                    f"⚡ すぐに処理を開始します"
+                )
+            )
+        
+        job_queue.put({
+            'func': process_job_search,
+            'args': (search_query, user_id, say, client, channel_id, thread_ts),
             'kwargs': {}
         })
         
@@ -1024,14 +1304,16 @@ def handle_mention(event, say, logger, client):
             text=(
                 f"❌ 不明なコマンド: `{command}`\n\n"
                 "*使えるコマンド:*\n"
-                f"• `{bot_mention} job J-XXXXXXX` - 求人レコメンド\n"
-                f"• `{bot_mention} company <検索クエリ>` - 企業探索\n"
+                f"• `{bot_mention} candidate J-XXXXXXX` - 求人IDから候補者を探す\n"
+                f"• `{bot_mention} job <キーワード>` - キーワードから求人を探す\n"
+                f"• `{bot_mention} company <キーワード>` - キーワードから企業を探す\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
                 f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードリロード\n\n"
-                "*企業探索の例:*\n"
-                f"• `{bot_mention} company SaaS系スタートアップ`\n"
-                f"• `{bot_mention} company リモートワークOK`"
+                "*例:*\n"
+                f"• `{bot_mention} candidate J-0000024062`\n"
+                f"• `{bot_mention} job フルリモート`\n"
+                f"• `{bot_mention} company SaaS系スタートアップ`"
             )
         )
 
@@ -1095,11 +1377,12 @@ if __name__ == "__main__":
     print("✅ 起動完了！Slackでボットにメンションしてください")
     print()
     print("📖 使い方:")
-    print(f"   @{BOT_NAME} job J-0000023845              # 求人レコメンド")
-    print(f"   @{BOT_NAME} company SaaS系スタートアップ  # 企業探索")
-    print(f"   @{BOT_NAME} ping                          # ヘルスチェック")
-    print(f"   @{BOT_NAME} test                          # OpenCode疎通テスト")
-    print(f"   @{BOT_NAME} reload                        # コードリロード")
+    print(f"   @{BOT_NAME} candidate J-0000023845          # 求人IDから候補者を探す")
+    print(f"   @{BOT_NAME} job Pythonエンジニア            # キーワードから求人を探す")
+    print(f"   @{BOT_NAME} company SaaS系スタートアップ    # キーワードから企業を探す")
+    print(f"   @{BOT_NAME} ping                            # ヘルスチェック")
+    print(f"   @{BOT_NAME} test                            # OpenCode疎通テスト")
+    print(f"   @{BOT_NAME} reload                          # コードリロード")
     print()
     print("🔄 ジョブキュー: 有効（並列実行を防止し、1件ずつ順番に処理）")
     print("⏰ スケジューラー: 有効（毎日8時にデータダウンロード実行）")

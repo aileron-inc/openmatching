@@ -8,8 +8,9 @@ OpenCode AI を使った人材マッチングシステム
 opencode-matching/
 ├── bin/                # 実行スクリプト
 │   ├── download.py     # データダウンロード＆NDJSON変換
-│   ├── job.py          # 求人マッチング
-│   ├── company.py      # 企業検索
+│   ├── candidate.py    # 候補者マッチング（求人ID→候補者）
+│   ├── job.py          # 求人検索（キーワード→求人）
+│   ├── company.py      # 企業検索（キーワード→企業）
 │   ├── bot.py          # Slackボット（オプション）
 │   └── updater.py      # GitHub更新ツール
 │
@@ -17,7 +18,7 @@ opencode-matching/
 └── workspace/          # OpenCode作業スペース
     ├── AGENTS.md       # OpenCode指示書
     ├── *.ndjson        # データファイル
-    └── output/         # マッチング結果
+    └── output/         # マッチング・検索結果
 ```
 
 ## 🚀 使い方
@@ -32,36 +33,51 @@ Salesforce からデータをダウンロードし、workspace/ に NDJSON 配�
 
 **環境変数:**
 - `SALESFORCE_CREDENTIALS` (required): Salesforce認証情報（JSON形式）
+- `SALESFORCE_REPORT_IDS` (optional): レポートIDとファイル名のマッピング
 - `RECENT_INTERVIEW_DAYS` (optional, default: 60): 初回面談日フィルタ（日数）
 - `MIN_SURVEY_YEAR` (optional, default: 2024): アンケート回答年フィルタ
 - `VALID_RANKS` (optional, default: S,A,B): 登録時ランクフィルタ
 - `JOB_STATUS` (optional, default: アクティブ): 求人状態フィルタ
 
-### 2. 求人マッチング
+### 2. 候補者マッチング（求人IDから候補者を探す）
 
 ```bash
-uv run bin/job.py J-0000023845
-uv run bin/job.py 23845           # 数字のみでもOK
+uv run bin/candidate.py J-0000023845
+uv run bin/candidate.py 23845      # 数字のみでもOK
 ```
 
 求人IDに合う候補者をマッチングします。
 
-### 3. 企業検索
+### 3. 求人検索（キーワードから求人を探す）
+
+```bash
+uv run bin/job.py "Pythonエンジニア" 10
+uv run bin/job.py "フルリモート"
+```
+
+キーワードに合う求人を検索します。
+
+### 4. 企業検索（キーワードから企業を探す）
 
 ```bash
 uv run bin/company.py "SaaS系スタートアップ" 10
 uv run bin/company.py "週1出社" 20
 ```
 
-条件に合う企業を検索します。
+キーワードに合う企業を検索します。
 
-### 4. Slackボット（オプション）
+### 5. Slackボット（オプション）
 
 ```bash
 uv run bin/bot.py
 ```
 
 Slack から上記機能を実行できます。
+
+**Slackコマンド:**
+- `@bot candidate J-XXXXXXX` - 求人IDから候補者を探す
+- `@bot job <キーワード>` - キーワードから求人を探す
+- `@bot company <キーワード>` - キーワードから企業を探す
 
 **必要な環境変数:**
 - `SLACK_BOT_TOKEN`
@@ -89,10 +105,12 @@ uv run bin/download.py
 
 ## 📝 出力
 
-マッチング結果は `workspace/output/` に保存されます：
+マッチング・検索結果は `workspace/output/` に保存されます：
 
-- `matching_YYYYMMDD_HHMMSS.csv` - 求人マッチング結果
-- `matching_YYYYMMDD_HHMMSS_summary.md` - マッチングサマリー
+- `matching_YYYYMMDD_HHMMSS.csv` - 候補者マッチング結果
+- `matching_YYYYMMDD_HHMMSS_summary.md` - 候補者マッチングサマリー
+- `jobs_YYYYMMDD_HHMMSS.csv` - 求人検索結果
+- `jobs_YYYYMMDD_HHMMSS_summary.md` - 求人検索サマリー
 - `companies_YYYYMMDD_HHMMSS.csv` - 企業検索結果
 - `companies_YYYYMMDD_HHMMSS_summary.md` - 企業検索サマリー
 

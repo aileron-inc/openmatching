@@ -24,12 +24,35 @@ import pandas as pd
 from dotenv import load_dotenv
 
 
-# Salesforce レポートID定義
-REPORT_IDS = {
-    '00ORA000002xya52AA': '求職者.csv',
-    '00ORA000002xyi92AA': '求人票.csv',
-    '00ORA000002yLlB2AU': '企業.csv',
-}
+def get_report_ids() -> dict:
+    """環境変数からレポートIDを取得"""
+    report_ids_str = os.getenv('SALESFORCE_REPORT_IDS')
+    
+    if not report_ids_str:
+        print("❌ Error: SALESFORCE_REPORT_IDS 環境変数が設定されていません")
+        print("   .env ファイルに以下の形式で追加してください:")
+        print("   SALESFORCE_REPORT_IDS='レポートID1:ファイル名1.csv,レポートID2:ファイル名2.csv,...'")
+        sys.exit(1)
+    
+    try:
+        # カンマ区切りでパース: "ID1:file1.csv,ID2:file2.csv,..."
+        report_ids = {}
+        for pair in report_ids_str.split(','):
+            if ':' in pair:
+                report_id, filename = pair.split(':', 1)
+                report_ids[report_id.strip()] = filename.strip()
+        
+        if not report_ids:
+            print("❌ Error: SALESFORCE_REPORT_IDS が空です")
+            print("   .env ファイルで正しく設定されているか確認してください")
+            sys.exit(1)
+        
+        return report_ids
+    except Exception as e:
+        print(f"❌ Error: レポートIDのパースに失敗しました: {e}")
+        print("   .env ファイルのフォーマットを確認してください")
+        print("   正しい形式: SALESFORCE_REPORT_IDS='ID1:file1.csv,ID2:file2.csv'")
+        sys.exit(1)
 
 
 def parse_yaml_like_credentials(creds_str: str) -> dict:
@@ -251,21 +274,24 @@ def main():
     print(f"✅ 接続成功: {instance_url}")
     print()
     
-    print(f"📥 Step 2: レポートダウンロード開始 ({len(REPORT_IDS)}件)")
+    # レポートID取得
+    report_ids = get_report_ids()
+    
+    print(f"📥 Step 2: レポートダウンロード開始 ({len(report_ids)}件)")
     print()
     
     success_count = 0
-    for report_id, filename in REPORT_IDS.items():
+    for report_id, filename in report_ids.items():
         output_path = tmp_dir / filename
         if download_report(session_id, instance_url, report_id, output_path):
             success_count += 1
     
     print()
-    if success_count < len(REPORT_IDS):
-        print(f"⚠️ ダウンロード失敗: {success_count}/{len(REPORT_IDS)}件")
+    if success_count < len(report_ids):
+        print(f"⚠️ ダウンロード失敗: {success_count}/{len(report_ids)}件")
         sys.exit(1)
     
-    print(f"✅ ダウンロード完了: {success_count}/{len(REPORT_IDS)}件")
+    print(f"✅ ダウンロード完了: {success_count}/{len(report_ids)}件")
     print()
     
     # Step 3: NDJSON 変換

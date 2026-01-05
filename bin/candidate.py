@@ -163,7 +163,8 @@ wc -l output/{ulid}/chunks/filtered_candidates.ndjson
 **重要:** 
 - `candidates.ndjson` (80MB) は**絶対に直接読み込まない**こと
 - フィルタリングは緩めに（後でAIが精密評価するので多めに取る）
-- フィルタリング後が1000件超なら、先頭1000件に制限
+- フィルタリング後は**必ず500件以下に制限**してください（例: `head -500`）
+- 500件超の場合、処理がタイムアウトする可能性があります
 
 ### Step 2: OpenCodeで精密マッチング（AI判断・文脈理解）
 
@@ -181,14 +182,23 @@ wc -l output/{ulid}/chunks/filtered_candidates.ndjson
 
 **禁止事項:**
 - ❌ `jobs.ndjson` (65MB) や `candidates.ndjson` (80MB) を直接Readツールで読み込むこと
+- ❌ 500件を超えるfiltered_candidates.ndjsonを読み込むこと → タイムアウトリスクあり
 - ❌ Taskツールで並列処理 → 今回は不要（filtered_candidates.ndjsonは十分小さい）
 - ❌ 親ディレクトリ（../）へのアクセス
 
 **必須事項:**
-- ✅ 必ず最初にBashでgrepフィルタリング
-- ✅ フィルタリング後のファイルのみ読み込む
-- ✅ 最終成果物は `output/{ulid}/matching_summary.md` と `output/{ulid}/matching.csv` に保存
+- ✅ Step 1: Bashでgrepフィルタリング → 500件以下に制限
+- ✅ Step 2: フィルタリング後のファイルをReadツールで読み込む
+- ✅ Step 3: マッチング評価・ランク付け
+- ✅ **Step 4: 必ず最終成果物を作成** → `output/{ulid}/matching_summary.md` と `output/{ulid}/matching.csv`
 - ✅ 作業ディレクトリ: `workspace/` 内のみ
+
+**⚠️ 重要: 最終ファイルを必ず作成してください**
+処理が完了したら、必ずWriteツールで以下の2ファイルを作成すること：
+1. `output/{ulid}/matching_summary.md`
+2. `output/{ulid}/matching.csv`
+
+これらのファイルがないと、Slackに結果を投稿できません。
 """
     
     opencode_cmd.append(prompt)

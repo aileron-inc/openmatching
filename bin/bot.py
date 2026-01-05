@@ -118,11 +118,13 @@ def process_job_search(search_query, user_id, say, client, channel_id, thread_ts
         results_dir = project_dir / "workspace" / "output"
         ulid_dirs = sorted([d for d in results_dir.iterdir() if d.is_dir()], reverse=True)
         
+        latest_ulid = None
         if not ulid_dirs:
             latest_summary = None
             latest_csv = None
         else:
             latest_dir = ulid_dirs[0]
+            latest_ulid = latest_dir.name  # ULID取得
             latest_summary = latest_dir / "jobs_summary.md"
             latest_csv = latest_dir / "jobs.csv"
             
@@ -723,14 +725,17 @@ def process_candidate_matching(job_id, user_id, say, client, channel_id, thread_
                 )
         else:
             print(f"⚠️  結果ファイルが見つかりません")
+            print(f"🆔 ULID: {latest_ulid if latest_ulid else 'N/A'}")
             # メッセージ更新（警告）
             client.chat_update(
                 channel=channel_id,
                 ts=status_ts,
                 text=(
                     f"⚠️ 処理は完了しましたが、結果ファイルが見つかりませんでした\n\n"
-                    f"求人ID: `{job_id}`\n"
-                    f"⏱️ 処理時間: {elapsed_str}\n\n"
+                    f"検索クエリ: `{search_query}`\n"
+                    f"⏱️ 処理時間: {elapsed_str}\n"
+                    f"🆔 処理ID (ULID): `{latest_ulid if latest_ulid else 'N/A'}`\n\n"
+                    f"OpenCodeが最終ファイル(jobs_summary.md, jobs.csv)を作成しませんでした。\n"
                     f"お手数ですが、もう一度お試しください"
                 )
             )
@@ -744,9 +749,9 @@ def process_candidate_matching(job_id, user_id, say, client, channel_id, thread_
             ts=status_ts,
             text=(
                 f"⏱️ タイムアウト: 処理に10分以上かかっています\n\n"
-                f"求人ID: `{job_id}`\n"
+                f"検索クエリ: `{search_query}`\n"
                 f"経過時間: {elapsed_str}\n\n"
-                f"申し訳ございません。もう一度お試しください"
+                f"申し訳ございません。検索条件を絞ってもう一度お試しください"
             )
         )
     except FileNotFoundError as e:

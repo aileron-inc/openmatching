@@ -85,17 +85,22 @@ wc -l output/{ulid}/chunks/filtered_jobs.ndjson
 
 **重要:** 
 - 元の `jobs.ndjson` は**絶対に直接読み込まない**こと
-- フィルタリング後のファイルサイズが大きすぎる場合（1000件超）は、キーワードを絞るか先頭1000件に制限
+- フィルタリング後は**必ず500件以下に制限**してください（例: `head -500`）
+- 500件超の場合、処理がタイムアウトする可能性があります
 
 ### Step 2: OpenCodeで精密ランキング（AI判断・文脈理解）
 
-フィルタリング済みの `filtered_jobs.ndjson` をReadツールで読み込み、以下の観点で評価・ランキングします：
+`filtered_jobs.ndjson` (500件以下) をReadツールで読み込み、以下の観点で評価・ランキングします：
 
 1. **検索意図との適合度**: 「{query}」が求める本質的なニーズに合っているか
 2. **総合的な魅力度**: 年収・勤務地・リモート可否・企業の成長性など
 3. **文脈理解**: キーワードだけでなく、職務内容全体を見て判断
 
-上位{count}件を選出し、最終レポートを作成してください。
+**必ず以下の2ファイルを作成してください:**
+1. `output/{ulid}/jobs_summary.md` - 詳細レポート（Slack Canvas表示用）
+2. `output/{ulid}/jobs.csv` - データリスト（スプレッドシート用）
+
+上位{count}件を選出して、最終レポートとCSVを作成してください。
 
 ## 出力形式の要件
 
@@ -164,14 +169,23 @@ wc -l output/{ulid}/chunks/filtered_jobs.ndjson
 
 **禁止事項:**
 - ❌ `jobs.ndjson` (65MB) を直接Readツールで読み込むこと → タイムアウトします
+- ❌ 500件を超えるfiltered_jobs.ndjsonを読み込むこと → タイムアウトリスクあり
 - ❌ Taskツールで並列処理 → 今回は不要（filtered_jobs.ndjsonは十分小さい）
 - ❌ 親ディレクトリ（../）へのアクセス
 
 **必須事項:**
-- ✅ 必ず最初にBashでgrepフィルタリング
-- ✅ フィルタリング後の `output/{ulid}/chunks/filtered_jobs.ndjson` のみ読み込む
-- ✅ 最終成果物は `output/{ulid}/jobs_summary.md` と `output/{ulid}/jobs.csv` に保存
+- ✅ Step 1: Bashでgrepフィルタリング → 500件以下に制限
+- ✅ Step 2: `output/{ulid}/chunks/filtered_jobs.ndjson` をReadツールで読み込む
+- ✅ Step 3: 上位{count}件を選出して評価
+- ✅ **Step 4: 必ず最終成果物を作成** → `output/{ulid}/jobs_summary.md` と `output/{ulid}/jobs.csv`
 - ✅ 作業ディレクトリ: `workspace/` 内のみ
+
+**⚠️ 重要: 最終ファイルを必ず作成してください**
+処理が完了したら、必ずWriteツールで以下の2ファイルを作成すること：
+1. `output/{ulid}/jobs_summary.md`
+2. `output/{ulid}/jobs.csv`
+
+これらのファイルがないと、Slackに結果を投稿できません。
 """
     
     opencode_cmd.append(prompt)

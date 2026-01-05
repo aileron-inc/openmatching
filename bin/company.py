@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = []
+# dependencies = ["python-ulid", "typing-extensions"]
 # ///
 """
 Company Search Interface
@@ -16,6 +16,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from ulid import ULID
 
 
 def main():
@@ -32,10 +33,17 @@ def main():
     project_root = Path(__file__).parent.parent
     workspace_dir = project_root / 'workspace'
     
+    # ULID生成とディレクトリ作成
+    ulid = str(ULID())
+    work_dir = workspace_dir / 'output' / ulid
+    chunks_dir = work_dir / 'chunks'
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    
     # workspace ディレクトリに移動
     print(f"📍 Working directory: {workspace_dir}")
     print(f"🔍 Search Query: {query}")
     print(f"📊 Count: {count}社")
+    print(f"🆔 Session ULID: {ulid}")
     print()
     
     # OpenCode設定
@@ -53,9 +61,16 @@ def main():
     # OpenCode 実行
     prompt = f"""「{query}」に合う企業を{count}社探してください。
 
+## 作業ディレクトリとファイル配置
+
+**重要: すべての出力は output/{ulid}/ ディレクトリに保存してください**
+
+- 作業用チャンクファイル: `output/{ulid}/chunks/` に配置
+- 最終成果物: `output/{ulid}/companies_summary.md` と `output/{ulid}/companies.csv`
+
 ## 出力形式の要件
 
-### サマリーファイル（companies_*_summary.md）について
+### サマリーファイル（companies_summary.md）について
 このサマリーは **Slack Canvas で最終成果物として表示される** ため、読みやすく詳細なレポート形式で作成してください。
 
 **必須セクション:**
@@ -103,15 +118,32 @@ def main():
 - 抽象的な表現ではなく、具体的な事実に基づいて記述すること
 - 読み手が即座に理解できる文章にすること
 
-## 技術的制約
+## 技術的制約とデータ処理戦略
 
-- このディレクトリ（workspace/）内のファイルのみを使用すること
-- companies.ndjson から企業データを読み込む
-  - **重要**: ファイルが大きい場合は、Bash コマンドで最初の500-1000行をサンプリングしてから処理すること
-  - 例: `head -n 1000 companies.ndjson > companies_sample.ndjson` を実行してから読み込む
-  - または、Python でストリーミング処理（1行ずつ読み込み）を行う
-- 結果は output/ ディレクトリに保存する
-- 親ディレクトリ（../）のファイルにはアクセスしない
+**重要: companies.ndjson (3.4MB) の効率的処理**
+
+1. **データソース**
+   - `companies.ndjson`: 企業データベース
+
+2. **推奨処理手順**
+   ```bash
+   # Step 1: 検索クエリに関連する企業をフィルタリング
+   grep -iE "キーワード1|キーワード2|キーワード3" companies.ndjson > output/{ulid}/chunks/filtered_companies.ndjson
+   
+   # Step 2: 必要に応じてチャンク分割
+   cd output/{ulid}/chunks
+   split -l 500 filtered_companies.ndjson company_chunk_
+   
+   # Step 3: 各チャンクを処理してマッチング評価
+   # （OpenCode Taskツールを使用して並列実行可能）
+   
+   # Step 4: 結果を集約して output/{ulid}/companies_summary.md と companies.csv を生成
+   ```
+
+3. **制約事項**
+   - workspace/ ディレクトリ内のファイルのみ使用
+   - 親ディレクトリ（../）へのアクセス禁止
+   - 最終成果物は必ず `output/{ulid}/` に配置
 """
     
     opencode_cmd.append(prompt)

@@ -114,10 +114,26 @@ def process_job_search(search_query, user_id, say, client, channel_id, thread_ts
         print(f"✅ 求人検索処理完了")
         print(f"📤 Slackへの結果投稿を開始...")
         
-        # 最新の結果ファイルを探す
+        # 最新の結果ファイルを探す（ULID directory内）
         results_dir = project_dir / "workspace" / "output"
-        summary_files = sorted(results_dir.glob("jobs_*_summary.md"), reverse=True)
-        csv_files = sorted(results_dir.glob("jobs_*.csv"), reverse=True)
+        ulid_dirs = sorted([d for d in results_dir.iterdir() if d.is_dir()], reverse=True)
+        
+        if not ulid_dirs:
+            latest_summary = None
+            latest_csv = None
+        else:
+            latest_dir = ulid_dirs[0]
+            latest_summary = latest_dir / "jobs_summary.md"
+            latest_csv = latest_dir / "jobs.csv"
+            
+            # ファイル存在確認
+            if not latest_summary.exists():
+                latest_summary = None
+            if not latest_csv.exists():
+                latest_csv = None
+        
+        summary_files = [latest_summary] if latest_summary else []
+        csv_files = [latest_csv] if latest_csv else []
         
         if summary_files and csv_files:
             latest_summary = summary_files[0]
@@ -341,10 +357,26 @@ def process_company_search(search_query, user_id, say, client, channel_id, threa
         print(f"✅ 企業探索処理完了")
         print(f"📤 Slackへの結果投稿を開始...")
         
-        # 最新の結果ファイルを探す
+        # 最新の結果ファイルを探す（ULID directory内）
         results_dir = project_dir / "workspace" / "output"
-        summary_files = sorted(results_dir.glob("companies_*_summary.md"), reverse=True)
-        csv_files = sorted(results_dir.glob("companies_*.csv"), reverse=True)
+        ulid_dirs = sorted([d for d in results_dir.iterdir() if d.is_dir()], reverse=True)
+        
+        if not ulid_dirs:
+            latest_summary = None
+            latest_csv = None
+        else:
+            latest_dir = ulid_dirs[0]
+            latest_summary = latest_dir / "companies_summary.md"
+            latest_csv = latest_dir / "companies.csv"
+            
+            # ファイル存在確認
+            if not latest_summary.exists():
+                latest_summary = None
+            if not latest_csv.exists():
+                latest_csv = None
+        
+        summary_files = [latest_summary] if latest_summary else []
+        csv_files = [latest_csv] if latest_csv else []
         
         if summary_files and csv_files:
             latest_summary = summary_files[0]
@@ -568,10 +600,26 @@ def process_candidate_matching(job_id, user_id, say, client, channel_id, thread_
         print(f"✅ マッチング処理完了")
         print(f"📤 Slackへの結果投稿を開始...")
         
-        # 最新の結果ファイルを探す
+        # 最新の結果ファイルを探す（ULID directory内）
         results_dir = project_dir / "workspace" / "output"
-        summary_files = sorted(results_dir.glob("matching_*_summary.md"), reverse=True)
-        csv_files = sorted(results_dir.glob("matching_*.csv"), reverse=True)
+        ulid_dirs = sorted([d for d in results_dir.iterdir() if d.is_dir()], reverse=True)
+        
+        if not ulid_dirs:
+            latest_summary = None
+            latest_csv = None
+        else:
+            latest_dir = ulid_dirs[0]
+            latest_summary = latest_dir / "matching_summary.md"
+            latest_csv = latest_dir / "matching.csv"
+            
+            # ファイル存在確認
+            if not latest_summary.exists():
+                latest_summary = None
+            if not latest_csv.exists():
+                latest_csv = None
+        
+        summary_files = [latest_summary] if latest_summary else []
+        csv_files = [latest_csv] if latest_csv else []
         
         if summary_files and csv_files:
             latest_summary = summary_files[0]

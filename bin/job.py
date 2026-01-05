@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = []
+# dependencies = ["python-ulid", "typing-extensions"]
 # ///
 """
 Job Search Interface
@@ -16,6 +16,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from ulid import ULID
 
 
 def main():
@@ -32,8 +33,16 @@ def main():
     project_root = Path(__file__).parent.parent
     workspace_dir = project_root / 'workspace'
     
-    # workspace ディレクトリに移動
+    # ULID生成
+    ulid = str(ULID())
+    work_dir = workspace_dir / 'output' / ulid
+    chunks_dir = work_dir / 'chunks'
+    
+    # ディレクトリ作成
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    
     print(f"📍 Working directory: {workspace_dir}")
+    print(f"🆔 Process ID (ULID): {ulid}")
     print(f"🔍 Search Query: {query}")
     print(f"📊 Count: {count}件")
     print()
@@ -53,16 +62,62 @@ def main():
     # OpenCode 実行
     prompt = f"""「{query}」に合う求人を{count}件探してください。
 
+## 処理の流れ
+
+このタスクは大きなファイル（jobs.ndjson: 65MB, 6500件）を扱うため、以下の手順で分割処理してください：
+
+### Step 1: キーワードフィルタリング
+検索クエリに関連しそうなキーワードを使って、jobs.ndjsonから候補を絞り込みます。
+
+```bash
+# 検索クエリから関連キーワードを抽出してgrepで絞り込む
+# 例: "Pythonエンジニア 六本木" なら "python\|engineer\|六本木\|エンジニア" など
+grep -iE "関連キーワード1|関連キーワード2|..." jobs.ndjson > output/{ulid}/chunks/filtered_jobs.ndjson
+```
+
+**重要:** 元のjobs.ndjsonは直接読み込まないこと。必ずこのフィルタリングを最初に行ってください。
+
+### Step 2: ファイル分割
+フィルタリング済みファイルを3-4個のチャンクに分割します。
+
+```bash
+cd output/{ulid}/chunks
+# filtered_jobs.ndjsonを500行ずつ分割
+split -l 500 filtered_jobs.ndjson chunk_
+```
+
+これで chunk_aa, chunk_ab, chunk_ac... のようなファイルができます。
+
+### Step 3: 並列検索（Taskツールを使用）
+各チャンクを別々のサブエージェント（Task）で検索します。
+
+```
+Task 1: chunk_aa を検索してマッチする求人トップ5を返す
+Task 2: chunk_ab を検索してマッチする求人トップ5を返す  
+Task 3: chunk_ac を検索してマッチする求人トップ5を返す
+Task 4: chunk_ad を検索してマッチする求人トップ5を返す (もしあれば)
+```
+
+各Taskには以下のプロンプトを渡してください：
+「output/{ulid}/chunks/chunk_XX を読み込んで、検索クエリ「{query}」に合う求人トップ5を選んでください。結果はJSON配列で返してください。」
+
+### Step 4: 結果の統合
+各Taskから返ってきた候補（最大20件）から、最終的なトップ{count}件を選出します。
+
+### Step 5: 最終レポート作成
+選ばれたトップ{count}件について、以下の形式でレポートを作成してください。
+
 ## 出力形式の要件
 
-### サマリーファイル（jobs_*_summary.md）について
+### サマリーファイル（jobs_summary.md）
 このサマリーは **Slack Canvas で最終成果物として表示される** ため、読みやすく詳細なレポート形式で作成してください。
 
 **必須セクション:**
 
 1. **検索概要**
-   - 検索クエリ
+   - 検索クエリ: {query}
    - 検索日時
+   - 処理ID (ULID): {ulid}
    - 該当求人総数
    - 処理時間
 
@@ -109,13 +164,18 @@ def main():
 - 抽象的な表現ではなく、具体的な事実に基づいて記述すること
 - 読み手が即座に理解できる文章にすること
 
+## 出力先
+
+- サマリー: `output/{ulid}/jobs_summary.md`
+- CSV: `output/{ulid}/jobs.csv`
+- 中間ファイル: `output/{ulid}/chunks/` (フィルタリング結果、チャンクファイル等)
+
 ## 技術的制約
 
 - このディレクトリ（workspace/）内のファイルのみを使用すること
-- jobs.ndjson から求人データを読み込む
-  - ファイルが大きい場合は、ストリーミングで処理すること
-  - 最初の1000件程度をサンプリングして検索することを推奨
-- 結果は output/ ディレクトリに保存する
+- 作業ディレクトリ: output/{ulid}/
+- 中間ファイル保存先: output/{ulid}/chunks/
+- 元のjobs.ndjsonは直接読み込まないこと（必ずフィルタリング経由）
 - 親ディレクトリ（../）のファイルにはアクセスしない
 """
     

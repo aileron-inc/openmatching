@@ -137,33 +137,58 @@ def main():
 - 抽象的な表現ではなく、具体的な事実に基づいて記述すること
 - 読み手（CAやRAコンサルタント）が即座に理解できる文章にすること
 
-## 技術的制約とデータ処理戦略
+## 🔍 2段階処理戦略
 
-**重要: 大容量ファイルの効率的処理**
+このタスクは大きなファイル（jobs.ndjson: 65MB、candidates.ndjson: 80MB）を効率的に処理するため、2段階で行います：
 
-1. **データソース**
-   - `jobs.ndjson` (65MB, 6,500件): 対象求人を特定するため
-   - `candidates.ndjson` (80MB): 候補者データベース
+### Step 1: Bashで事前処理（高速・機械的）
 
-2. **推奨処理手順**
-   ```bash
-   # Step 1: 対象求人を抽出（求人ID: {job_id}）
-   grep "{job_id}" jobs.ndjson > output/{ulid}/chunks/target_job.ndjson
-   
-   # Step 2: 候補者データをチャンク分割（必要に応じて）
-   cd output/{ulid}/chunks
-   split -l 1000 ../../../candidates.ndjson candidate_chunk_
-   
-   # Step 3: 各チャンクを並列処理してマッチング評価
-   # （OpenCode Taskツールを使用して並列実行可能）
-   
-   # Step 4: 結果を集約して output/{ulid}/matching_summary.md と matching.csv を生成
-   ```
+```bash
+# 1-1. 対象求人を抽出（求人ID: {job_id}）
+grep "{job_id}" jobs.ndjson > output/{ulid}/chunks/target_job.ndjson
 
-3. **制約事項**
-   - workspace/ ディレクトリ内のファイルのみ使用
-   - 親ディレクトリ（../）へのアクセス禁止
-   - 最終成果物は必ず `output/{ulid}/` に配置
+# 1-2. 求人の必須スキル・キーワードを抽出してgrepパターンを作成
+# 例: 求人が「Python, Django, AWS経験者」を求めているなら
+#     → "python|Python|django|Django|aws|AWS|バックエンド|backend" など
+# 例: 求人が「営業経験3年以上」を求めているなら
+#     → "営業|sales|法人営業|新規開拓" など
+
+# 1-3. 候補者データを粗フィルタリング（数千件→数百件に削減）
+grep -iE "関連キーワード1|関連キーワード2|スキル1|スキル2|..." candidates.ndjson > output/{ulid}/chunks/filtered_candidates.ndjson
+
+# 件数確認
+wc -l output/{ulid}/chunks/filtered_candidates.ndjson
+```
+
+**重要:** 
+- `candidates.ndjson` (80MB) は**絶対に直接読み込まない**こと
+- フィルタリングは緩めに（後でAIが精密評価するので多めに取る）
+- フィルタリング後が1000件超なら、先頭1000件に制限
+
+### Step 2: OpenCodeで精密マッチング（AI判断・文脈理解）
+
+1. `target_job.ndjson` を読んで求人要件を理解
+2. `filtered_candidates.ndjson` を読んで各候補者を評価
+3. 以下の観点でマッチング：
+   - 必須スキル・経験の充足度
+   - 希望条件（年収・勤務地・働き方）との適合度
+   - キャリアの方向性・志向性
+   - 即戦力性 vs ポテンシャル
+
+上位10-20名を選出し、ランク付け（A+, A, B）して最終レポートを作成してください。
+
+## 📋 処理上の重要な注意点
+
+**禁止事項:**
+- ❌ `jobs.ndjson` (65MB) や `candidates.ndjson` (80MB) を直接Readツールで読み込むこと
+- ❌ Taskツールで並列処理 → 今回は不要（filtered_candidates.ndjsonは十分小さい）
+- ❌ 親ディレクトリ（../）へのアクセス
+
+**必須事項:**
+- ✅ 必ず最初にBashでgrepフィルタリング
+- ✅ フィルタリング後のファイルのみ読み込む
+- ✅ 最終成果物は `output/{ulid}/matching_summary.md` と `output/{ulid}/matching.csv` に保存
+- ✅ 作業ディレクトリ: `workspace/` 内のみ
 """
     
     opencode_cmd.append(prompt)

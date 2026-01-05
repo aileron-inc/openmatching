@@ -118,32 +118,52 @@ def main():
 - 抽象的な表現ではなく、具体的な事実に基づいて記述すること
 - 読み手が即座に理解できる文章にすること
 
-## 技術的制約とデータ処理戦略
+## 🔍 2段階処理戦略
 
-**重要: companies.ndjson (3.4MB) の効率的処理**
+このタスクは companies.ndjson (3.4MB) を効率的に処理するため、2段階で行います：
 
-1. **データソース**
-   - `companies.ndjson`: 企業データベース
+### Step 1: Bashで粗フィルタリング（高速・機械的）
 
-2. **推奨処理手順**
-   ```bash
-   # Step 1: 検索クエリに関連する企業をフィルタリング
-   grep -iE "キーワード1|キーワード2|キーワード3" companies.ndjson > output/{ulid}/chunks/filtered_companies.ndjson
-   
-   # Step 2: 必要に応じてチャンク分割
-   cd output/{ulid}/chunks
-   split -l 500 filtered_companies.ndjson company_chunk_
-   
-   # Step 3: 各チャンクを処理してマッチング評価
-   # （OpenCode Taskツールを使用して並列実行可能）
-   
-   # Step 4: 結果を集約して output/{ulid}/companies_summary.md と companies.csv を生成
-   ```
+まず、検索クエリに関連しそうなキーワードでgrepフィルタリングを行い、候補を絞り込みます。
 
-3. **制約事項**
-   - workspace/ ディレクトリ内のファイルのみ使用
-   - 親ディレクトリ（../）へのアクセス禁止
-   - 最終成果物は必ず `output/{ulid}/` に配置
+```bash
+# 検索クエリ「{query}」から関連キーワードを抽出してgrepパターンを作成
+# 例: "SaaS系スタートアップ" → "SaaS|saas|クラウド|スタートアップ|startup|ベンチャー" など
+# 例: "リモートワークOK" → "リモート|remote|在宅|フルリモート|テレワーク|出社不要" など
+# 例: "フィンテック" → "フィンテック|fintech|金融|決済|ブロックチェーン" など
+
+# 類義語・関連語も含めて幅広くフィルタリング（後でAIが精密ランキングするので多めに取る）
+grep -iE "関連キーワード1|関連キーワード2|類義語1|類義語2|..." companies.ndjson > output/{ulid}/chunks/filtered_companies.ndjson
+
+# 件数確認
+wc -l output/{ulid}/chunks/filtered_companies.ndjson
+```
+
+**重要:** 
+- 元の `companies.ndjson` は**直接読み込まない**こと（推奨）
+- フィルタリング後のファイルサイズが大きすぎる場合（500件超）は、キーワードを絞るか先頭500件に制限
+
+### Step 2: OpenCodeで精密ランキング（AI判断・文脈理解）
+
+フィルタリング済みの `filtered_companies.ndjson` をReadツールで読み込み、以下の観点で評価・ランキングします：
+
+1. **検索意図との適合度**: 「{query}」が求める本質的なニーズに合っているか
+2. **総合的な魅力度**: 事業内容・企業文化・成長性・働き方など
+3. **文脈理解**: キーワードだけでなく、企業情報全体を見て判断
+
+上位{count}社を選出し、最終レポートを作成してください。
+
+## 📋 処理上の重要な注意点
+
+**禁止事項:**
+- ❌ Taskツールで並列処理 → 今回は不要（filtered_companies.ndjsonは十分小さい）
+- ❌ 親ディレクトリ（../）へのアクセス
+
+**必須事項:**
+- ✅ 必ず最初にBashでgrepフィルタリング（推奨）
+- ✅ フィルタリング後の `output/{ulid}/chunks/filtered_companies.ndjson` を読み込む
+- ✅ 最終成果物は `output/{ulid}/companies_summary.md` と `output/{ulid}/companies.csv` に保存
+- ✅ 作業ディレクトリ: `workspace/` 内のみ
 """
     
     opencode_cmd.append(prompt)

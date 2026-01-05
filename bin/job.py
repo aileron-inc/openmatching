@@ -62,50 +62,40 @@ def main():
     # OpenCode 実行
     prompt = f"""「{query}」に合う求人を{count}件探してください。
 
-## 処理の流れ
+## 🔍 2段階処理戦略
 
-このタスクは大きなファイル（jobs.ndjson: 65MB, 6500件）を扱うため、以下の手順で分割処理してください：
+このタスクは大きなファイル（jobs.ndjson: 65MB, 6500件）を効率的に処理するため、2段階で行います：
 
-### Step 1: キーワードフィルタリング
-検索クエリに関連しそうなキーワードを使って、jobs.ndjsonから候補を絞り込みます。
+### Step 1: Bashで粗フィルタリング（高速・機械的）
 
-```bash
-# 検索クエリから関連キーワードを抽出してgrepで絞り込む
-# 例: "Pythonエンジニア 六本木" なら "python\|engineer\|六本木\|エンジニア" など
-grep -iE "関連キーワード1|関連キーワード2|..." jobs.ndjson > output/{ulid}/chunks/filtered_jobs.ndjson
-```
-
-**重要:** 元のjobs.ndjsonは直接読み込まないこと。必ずこのフィルタリングを最初に行ってください。
-
-### Step 2: ファイル分割
-フィルタリング済みファイルを3-4個のチャンクに分割します。
+まず、検索クエリに関連しそうなキーワードでgrepフィルタリングを行い、候補を数百件程度に絞り込みます。
 
 ```bash
-cd output/{ulid}/chunks
-# filtered_jobs.ndjsonを500行ずつ分割
-split -l 500 filtered_jobs.ndjson chunk_
+# 検索クエリ「{query}」から関連キーワードを抽出してgrepパターンを作成
+# 例: "Pythonエンジニア" → "python|Python|engineer|エンジニア" など
+# 例: "リモートワーク" → "リモート|remote|在宅|フルリモート|出社不要" など
+# 例: "SaaS スタートアップ" → "SaaS|saas|スタートアップ|startup|ベンチャー" など
+
+# 類義語・関連語も含めて幅広くフィルタリング（後でAIが精密ランキングするので多めに取る）
+grep -iE "関連キーワード1|関連キーワード2|類義語1|類義語2|..." jobs.ndjson > output/{ulid}/chunks/filtered_jobs.ndjson
+
+# 件数確認
+wc -l output/{ulid}/chunks/filtered_jobs.ndjson
 ```
 
-これで chunk_aa, chunk_ab, chunk_ac... のようなファイルができます。
+**重要:** 
+- 元の `jobs.ndjson` は**絶対に直接読み込まない**こと
+- フィルタリング後のファイルサイズが大きすぎる場合（1000件超）は、キーワードを絞るか先頭1000件に制限
 
-### Step 3: 並列検索（Taskツールを使用）
-各チャンクを別々のサブエージェント（Task）で検索します。
+### Step 2: OpenCodeで精密ランキング（AI判断・文脈理解）
 
-```
-Task 1: chunk_aa を検索してマッチする求人トップ5を返す
-Task 2: chunk_ab を検索してマッチする求人トップ5を返す  
-Task 3: chunk_ac を検索してマッチする求人トップ5を返す
-Task 4: chunk_ad を検索してマッチする求人トップ5を返す (もしあれば)
-```
+フィルタリング済みの `filtered_jobs.ndjson` をReadツールで読み込み、以下の観点で評価・ランキングします：
 
-各Taskには以下のプロンプトを渡してください：
-「output/{ulid}/chunks/chunk_XX を読み込んで、検索クエリ「{query}」に合う求人トップ5を選んでください。結果はJSON配列で返してください。」
+1. **検索意図との適合度**: 「{query}」が求める本質的なニーズに合っているか
+2. **総合的な魅力度**: 年収・勤務地・リモート可否・企業の成長性など
+3. **文脈理解**: キーワードだけでなく、職務内容全体を見て判断
 
-### Step 4: 結果の統合
-各Taskから返ってきた候補（最大20件）から、最終的なトップ{count}件を選出します。
-
-### Step 5: 最終レポート作成
-選ばれたトップ{count}件について、以下の形式でレポートを作成してください。
+上位{count}件を選出し、最終レポートを作成してください。
 
 ## 出力形式の要件
 
@@ -170,13 +160,18 @@ Task 4: chunk_ad を検索してマッチする求人トップ5を返す (もし
 - CSV: `output/{ulid}/jobs.csv`
 - 中間ファイル: `output/{ulid}/chunks/` (フィルタリング結果、チャンクファイル等)
 
-## 技術的制約
+## 📋 処理上の重要な注意点
 
-- このディレクトリ（workspace/）内のファイルのみを使用すること
-- 作業ディレクトリ: output/{ulid}/
-- 中間ファイル保存先: output/{ulid}/chunks/
-- 元のjobs.ndjsonは直接読み込まないこと（必ずフィルタリング経由）
-- 親ディレクトリ（../）のファイルにはアクセスしない
+**禁止事項:**
+- ❌ `jobs.ndjson` (65MB) を直接Readツールで読み込むこと → タイムアウトします
+- ❌ Taskツールで並列処理 → 今回は不要（filtered_jobs.ndjsonは十分小さい）
+- ❌ 親ディレクトリ（../）へのアクセス
+
+**必須事項:**
+- ✅ 必ず最初にBashでgrepフィルタリング
+- ✅ フィルタリング後の `output/{ulid}/chunks/filtered_jobs.ndjson` のみ読み込む
+- ✅ 最終成果物は `output/{ulid}/jobs_summary.md` と `output/{ulid}/jobs.csv` に保存
+- ✅ 作業ディレクトリ: `workspace/` 内のみ
 """
     
     opencode_cmd.append(prompt)

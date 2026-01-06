@@ -24,15 +24,15 @@ def normalize_job_id(job_id: str) -> str:
     # 数字のみの場合は J- プレフィックスを追加
     if job_id.isdigit():
         return f"J-{int(job_id):010d}"
-    
+
     # J- で始まる場合はそのまま
-    if job_id.startswith('J-'):
+    if job_id.startswith("J-"):
         return job_id
-    
+
     # 006で始まる場合は求人票ID（そのまま）
-    if job_id.startswith('006'):
+    if job_id.startswith("006"):
         return job_id
-    
+
     print(f"❌ 不明なID形式: {job_id}")
     print("対応形式: J-0000023845 / 23845 / 006RA00000HzHwb")
     sys.exit(1)
@@ -45,35 +45,36 @@ def main():
         print("Example: uv run candidate.py J-0000023845")
         print("Example: uv run candidate.py 23845")
         sys.exit(1)
-    
+
     job_id = normalize_job_id(sys.argv[1])
     project_root = Path(__file__).parent.parent
-    workspace_dir = project_root / 'workspace'
-    
+    workspace_dir = project_root / "workspace"
+
     # ULID生成とディレクトリ作成
     ulid = str(ULID())
-    work_dir = workspace_dir / 'output' / ulid
-    chunks_dir = work_dir / 'chunks'
+    work_dir = workspace_dir / "output" / ulid
+    chunks_dir = work_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # workspace ディレクトリに移動
     print(f"📍 Working directory: {workspace_dir}")
     print(f"🎯 Job ID: {job_id}")
     print(f"🆔 Session ULID: {ulid}")
     print()
-    
+
     # OpenCode設定
-    opencode_cmd = ['opencode', 'run']
-    
-    # 環境変数からモデルを設定
-    opencode_model = os.getenv('OPENCODE_MODEL')
-    if opencode_model:
-        opencode_cmd.extend(['--model', opencode_model])
-        print(f"🤖 OpenCode Model: {opencode_model}")
-    
+    opencode_cmd = ["opencode", "run"]
+
+    # 環境変数からモデルを設定（デフォルト: xai/grok-code-fast）
+    opencode_model = os.getenv("OPENCODE_MODEL", "xai/grok-code-fast")
+    opencode_cmd.extend(["--model", opencode_model])
+    print(f"🤖 OpenCode Model: {opencode_model}")
+
     # Salesforce URL を環境変数から取得
-    salesforce_base_url = os.getenv('SALESFORCE_BASE_URL', 'https://your-org.lightning.force.com')
-    
+    salesforce_base_url = os.getenv(
+        "SALESFORCE_BASE_URL", "https://your-org.lightning.force.com"
+    )
+
     # OpenCode 実行
     prompt = f"""求人ID「{job_id}」に合う候補者をマッチングしてください。
 
@@ -200,17 +201,13 @@ wc -l output/{ulid}/chunks/filtered_candidates.ndjson
 
 これらのファイルがないと、Slackに結果を投稿できません。
 """
-    
+
     opencode_cmd.append(prompt)
-    
-    result = subprocess.run(
-        opencode_cmd,
-        cwd=workspace_dir,
-        check=False
-    )
-    
+
+    result = subprocess.run(opencode_cmd, cwd=workspace_dir, check=False)
+
     sys.exit(result.returncode)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

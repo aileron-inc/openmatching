@@ -23,42 +23,43 @@ def main():
     """メイン処理"""
     if len(sys.argv) < 2:
         print("Usage: uv run job.py <SEARCH_QUERY> [COUNT]")
-        print("Example: uv run job.py \"Pythonエンジニア\" 10")
-        print("Example: uv run job.py \"フルリモート\"")
+        print('Example: uv run job.py "Pythonエンジニア" 10')
+        print('Example: uv run job.py "フルリモート"')
         sys.exit(1)
-    
+
     query = sys.argv[1]
     count = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-    
+
     project_root = Path(__file__).parent.parent
-    workspace_dir = project_root / 'workspace'
-    
+    workspace_dir = project_root / "workspace"
+
     # ULID生成
     ulid = str(ULID())
-    work_dir = workspace_dir / 'output' / ulid
-    chunks_dir = work_dir / 'chunks'
-    
+    work_dir = workspace_dir / "output" / ulid
+    chunks_dir = work_dir / "chunks"
+
     # ディレクトリ作成
     chunks_dir.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"📍 Working directory: {workspace_dir}")
     print(f"🆔 Process ID (ULID): {ulid}")
     print(f"🔍 Search Query: {query}")
     print(f"📊 Count: {count}件")
     print()
-    
+
     # OpenCode設定
-    opencode_cmd = ['opencode', 'run']
-    
-    # 環境変数からモデルを設定
-    opencode_model = os.getenv('OPENCODE_MODEL')
-    if opencode_model:
-        opencode_cmd.extend(['--model', opencode_model])
-        print(f"🤖 OpenCode Model: {opencode_model}")
-    
+    opencode_cmd = ["opencode", "run"]
+
+    # 環境変数からモデルを設定（デフォルト: xai/grok-code-fast）
+    opencode_model = os.getenv("OPENCODE_MODEL", "xai/grok-code-fast")
+    opencode_cmd.extend(["--model", opencode_model])
+    print(f"🤖 OpenCode Model: {opencode_model}")
+
     # Salesforce URL を環境変数から取得
-    salesforce_base_url = os.getenv('SALESFORCE_BASE_URL', 'https://your-org.lightning.force.com')
-    
+    salesforce_base_url = os.getenv(
+        "SALESFORCE_BASE_URL", "https://your-org.lightning.force.com"
+    )
+
     # OpenCode 実行
     prompt = f"""「{query}」に合う求人を{count}件探してください。
 
@@ -187,17 +188,13 @@ wc -l output/{ulid}/chunks/filtered_jobs.ndjson
 
 これらのファイルがないと、Slackに結果を投稿できません。
 """
-    
+
     opencode_cmd.append(prompt)
-    
-    result = subprocess.run(
-        opencode_cmd,
-        cwd=workspace_dir,
-        check=False
-    )
-    
+
+    result = subprocess.run(opencode_cmd, cwd=workspace_dir, check=False)
+
     sys.exit(result.returncode)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

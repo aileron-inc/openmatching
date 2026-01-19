@@ -65,8 +65,8 @@ def main():
     # OpenCode設定
     opencode_cmd = ["opencode", "run"]
 
-    # 環境変数からモデルを設定（デフォルト: xai/grok-code-fast）
-    opencode_model = os.getenv("OPENCODE_MODEL", "xai/grok-code-fast")
+    # 環境変数からモデルを設定（デフォルト: opencode/grok-code）
+    opencode_model = os.getenv("OPENCODE_MODEL", "opencode/grok-code")
     opencode_cmd.extend(["--model", opencode_model])
     print(f"🤖 OpenCode Model: {opencode_model}")
 

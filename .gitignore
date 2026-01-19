@@ -7,6 +7,8 @@ workspace/*
 !workspace/output/
 workspace/output/*
 !workspace/output/.gitkeep
+workspace/data/*
+workspace/text/*
 
 # Python
 __pycache__/

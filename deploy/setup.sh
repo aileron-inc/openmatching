@@ -20,8 +20,18 @@ echo "📋 実行ユーザー: ${DEPLOY_USER}"
 echo "📁 プロジェクトパス: ${PROJECT_ROOT}"
 echo ""
 
-# Step 1: uv インストール
-echo "📦 Step 1: uv をインストール中..."
+# Step 1: mise インストール
+echo "🔧 Step 1: mise をインストール中..."
+if ! sudo -u ${DEPLOY_USER} command -v mise &> /dev/null; then
+  sudo -u ${DEPLOY_USER} bash -c "curl https://mise.run | sh"
+  echo "✅ mise インストール完了"
+else
+  echo "✅ mise は既にインストール済み"
+fi
+echo ""
+
+# Step 2: uv インストール
+echo "📦 Step 2: uv をインストール中..."
 if ! sudo -u ${DEPLOY_USER} command -v uv &> /dev/null; then
   sudo -u ${DEPLOY_USER} bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
   echo "✅ uv インストール完了"
@@ -30,7 +40,7 @@ else
 fi
 echo ""
 
-# Step 2: OpenCode CLI インストール
+# Step 3: OpenCode CLI インストール
 echo "🤖 Step 2: OpenCode CLI をインストール中..."
 if ! sudo -u ${DEPLOY_USER} command -v opencode &> /dev/null; then
   sudo -u ${DEPLOY_USER} bash -c "curl -fsSL https://opencode.ai/install | bash"
@@ -40,14 +50,21 @@ else
 fi
 echo ""
 
-# Step 3: 依存関係インストール
-echo "📚 Step 3: Python依存関係をインストール中..."
+# Step 4: mise ツールインストール
+echo "🛠️  Step 4: mise ツール（ripgrep等）をインストール中..."
+cd ${PROJECT_ROOT}
+sudo -u ${DEPLOY_USER} bash -c "source ~/.bashrc && ~/.local/bin/mise install"
+echo "✅ mise ツールインストール完了"
+echo ""
+
+# Step 5: Python依存関係インストール
+echo "📚 Step 5: Python依存関係をインストール中..."
 cd ${PROJECT_ROOT}
 sudo -u ${DEPLOY_USER} bash -c "source ~/.bashrc && ~/.local/bin/uv sync"
 echo "✅ 依存関係インストール完了"
 echo ""
 
-# Step 4: systemd service 登録
+# Step 6: systemd service 登録
 echo "⚙️  Step 4: systemd service を登録中..."
 cp ${PROJECT_ROOT}/deploy/openmatching-bot.service /etc/systemd/system/
 systemctl daemon-reload

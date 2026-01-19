@@ -2,7 +2,7 @@
 
 OpenCode AI を使った人材マッチングシステム
 
-## 📁 プロジェクト構造
+## 📁 プロジェクト構成
 
 ```
 opencode-matching/
@@ -12,16 +12,36 @@ opencode-matching/
 │   ├── job.py          # 求人検索（キーワード→求人）
 │   ├── company.py      # 企業検索（キーワード→企業）
 │   ├── bot.py          # Slackボット（オプション）
+│   ├── models.py       # 利用可能なAIモデル一覧
+│   ├── env.py          # 環境チェックツール
 │   └── updater.py      # GitHub更新ツール
 │
 ├── tmp/                # CSVダウンロード先（一時ファイル）
 └── workspace/          # OpenCode作業スペース
-    ├── AGENTS.md       # OpenCode指示書
-    ├── *.ndjson        # データファイル
-    └── output/         # マッチング・検索結果
+    ├── data/           # データファイル（分割済み）
+    ├── text/           # データファイル（テキスト形式コピー）
+    ├── output/         # マッチング・検索結果
+    └── AGENTS.md       # OpenCode指示書
 ```
 
 ## 🚀 使い方
+
+### 0. 利用可能なAIモデルの確認
+
+```bash
+uv run bin/models.py              # すべてのモデル
+uv run bin/models.py --free       # 無料モデルのみ
+uv run bin/models.py --verbose    # 詳細情報付き（コストなど）
+```
+
+**無料モデル（APIキー不要）:**
+- `opencode/glm-4.7-free`
+- `opencode/minimax-m2.1-free`
+
+**環境変数でモデル指定:**
+```bash
+OPENCODE_MODEL=opencode/glm-4.7-free
+```
 
 ### 1. データダウンロード（定期実行推奨）
 
@@ -29,7 +49,7 @@ opencode-matching/
 uv run bin/download.py
 ```
 
-Salesforce からデータをダウンロードし、workspace/ に NDJSON 配置します。
+Salesforce からデータをダウンロードし、workspace/data/ に NDJSON 配置します。
 
 **環境変数:**
 - `SALESFORCE_CREDENTIALS` (required): Salesforce認証情報（JSON形式）
@@ -78,6 +98,10 @@ Slack から上記機能を実行できます。
 - `@bot candidate J-XXXXXXX` - 求人IDから候補者を探す
 - `@bot job <キーワード>` - キーワードから求人を探す
 - `@bot company <キーワード>` - キーワードから企業を探す
+- `@bot ping` - Bot稼働状況確認
+- `@bot version` - バージョン情報確認（最新コミット、データ更新日時など）
+- `@bot test` - OpenCode疎通テスト
+- `@bot reload` - コードをリロード
 
 **必要な環境変数:**
 - `SLACK_BOT_TOKEN`

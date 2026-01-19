@@ -43,9 +43,177 @@ ADMIN_CHANNEL = os.environ.get("SLACK_CH")
 # ボット名（起動時に取得）
 BOT_NAME = None
 
+# Bot起動時間
+bot_start_time = datetime.now()
+
+# スレッド管理
+SESSIONS_FILE = Path(__file__).parent.parent / "workspace" / "sessions.json"
+
+
+def load_sessions():
+    if SESSIONS_FILE.exists():
+        import json
+
+        with open(SESSIONS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_sessions(sessions):
+    import json
+
+    SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SESSIONS_FILE, "w") as f:
+        json.dump(sessions, f, indent=2)
+
+
+def get_session_ulid(thread_ts):
+    if not thread_ts:
+        return None
+    sessions = load_sessions()
+    thread_key = f"{thread_ts}"
+    return sessions.get(thread_key)
+
+
+def save_session_ulid(thread_ts, ulid):
+    sessions = load_sessions()
+    thread_key = f"{thread_ts}"
+    sessions[thread_key] = ulid
+    save_sessions(sessions)
+
+
+def handle_choice_selection(choice_id, thread_ts, channel_id, user_id, client, say):
+    """選択肢の数字を受け取って処理"""
+    print(f"\n{'=' * 60}")
+    print(f"🔢 選択肢処理開始")
+    print(f"{'=' * 60}")
+    print(f"   選択ID: {choice_id}")
+    print(f"   スレッド: {thread_ts}")
+
+    # セッションULIDを取得
+    session_ulid = get_session_ulid(thread_ts)
+    if not session_ulid:
+        print("❌ セッションが見つかりません")
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text="❌ セッションが見つかりません。検索からやり直してください。",
+        )
+        return
+
+    # choices.jsonを読む
+    project_dir = Path(__file__).parent.parent.resolve()
+    choices_file = project_dir / "workspace" / "output" / session_ulid / "choices.json"
+
+    if not choices_file.exists():
+        print(f"❌ choices.jsonが見つかりません: {choices_file}")
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text="❌ 選択肢情報が見つかりません。検索からやり直してください。",
+        )
+        return
+
+    try:
+        import json
+
+        with open(choices_file, "r") as f:
+            choices_data = json.load(f)
+
+        suggestions = choices_data.get("suggestions", [])
+        selected = next((s for s in suggestions if s["id"] == choice_id), None)
+
+        if not selected:
+            print(f"❌ 選択肢が見つかりません: {choice_id}")
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=f"❌ 無効な選択肢です: {choice_id}",
+            )
+            return
+
+        print(f"✅ 選択肢: {selected}")
+
+        # 選択肢のタイプに応じて処理
+        if selected["type"] == "filter":
+            # フィルタリング継続
+            pattern = selected.get("pattern", "")
+            query = choices_data.get("query", "")
+
+            print(f"🔍 フィルタリング: {pattern}")
+
+            # スレッドで返信として処理開始
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=f"🔍 `{selected['text']}` で絞り込みます...\n\n⏰ 開始時刻: {datetime.now().strftime('%H:%M:%S')}",
+            )
+
+            # キューに追加して処理開始
+            if choices_file.parent.name.startswith("job"):
+                # job検索
+                job_queue.put(
+                    {
+                        "func": process_job_search,
+                        "args": (
+                            f"{query} ({selected['text']})",
+                            user_id,
+                            say,
+                            client,
+                            channel_id,
+                            thread_ts,
+                        ),
+                        "kwargs": {},
+                    }
+                )
+            else:
+                # company検索
+                job_queue.put(
+                    {
+                        "func": process_company_search,
+                        "args": (
+                            f"{query} ({selected['text']})",
+                            user_id,
+                            say,
+                            client,
+                            channel_id,
+                            thread_ts,
+                        ),
+                        "kwargs": {},
+                    }
+                )
+
+        elif selected["type"] == "show":
+            # そのままレポート作成
+            count = selected.get("count", 10)
+            query = choices_data.get("query", "")
+
+            print(f"📊 レポート作成: {count}件")
+
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=f"📊 上位{count}件を表示します...\n\n⏰ 開始時刻: {datetime.now().strftime('%H:%M:%S')}",
+            )
+
+            # ここはもうスクリプトが実行済みなので、単に結果ファイルを確認して表示
+            # 実際の処理はスクリプト側で行われているはず
+            pass
+
+    except Exception as e:
+        print(f"❌ 選択肢処理でエラー: {e}")
+        import traceback
+
+        traceback.print_exc()
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text="❌ 処理中にエラーが発生しました。",
+        )
+
 
 def process_job_search(
-    search_query, user_id, say, client, channel_id, thread_ts, count=10
+    search_query, user_id, say, client, channel_id, thread_ts, count=10, pattern=None
 ):
     """求人検索処理（キーワード型）"""
     start_time = time.time()
@@ -72,6 +240,10 @@ def process_job_search(
 
     status_ts = status_msg["ts"]
 
+    # スレッド管理
+    is_continuation = thread_ts is not None
+    session_ulid = get_session_ulid(thread_ts) if is_continuation else None
+
     try:
         # スクリプトのパスを取得
         project_dir = Path(__file__).parent.parent.resolve()
@@ -86,14 +258,22 @@ def process_job_search(
 
         print(f"📝 スクリプト実行中: {job_script}")
         print(f"📄 ログファイル: {log_file}")
+        print(f"🔁 継続モード: {is_continuation}")
+        print(f"🆔 セッションULID: {session_ulid}")
         print(f"{'=' * 60}")
         print(f"OpenCode 実行ログ:")
         print(f"{'=' * 60}\n")
 
+        # コマンド構築
+        cmd = ["uv", "run", str(job_script), search_query, str(count)]
+        if is_continuation and session_ulid:
+            cmd.extend(["--continue", session_ulid])
+        print(f"🚀 実行コマンド: {' '.join(cmd)}")
+
         # 検索実行（標準出力・標準エラーをログファイルに保存）
         with open(log_file, "w", encoding="utf-8") as f:
             result = subprocess.run(
-                ["uv", "run", str(job_script), search_query, str(count)],
+                cmd,
                 cwd=str(project_dir),
                 stdout=f,
                 stderr=subprocess.STDOUT,
@@ -151,6 +331,11 @@ def process_job_search(
 
         summary_files = [latest_summary] if latest_summary else []
         csv_files = [latest_csv] if latest_csv else []
+
+        # choices.jsonチェック
+        choices_file = None
+        if latest_ulid:
+            choices_file = results_dir / latest_ulid / "choices.json"
 
         if summary_files and csv_files:
             latest_summary = summary_files[0]
@@ -220,6 +405,11 @@ def process_job_search(
 
                 print(f"✅ Slack投稿完了")
 
+                # 新規スレッドの場合、ULIDを保存
+                if not is_continuation and latest_ulid:
+                    save_session_ulid(status_ts, latest_ulid)
+                    print(f"💾 セッション保存: {status_ts} → {latest_ulid}")
+
             except Exception as post_error:
                 print(f"⚠️  Slack投稿でエラー: {post_error}")
                 import traceback
@@ -239,6 +429,38 @@ def process_job_search(
                         f"CSV: `{latest_csv.name}`"
                     ),
                 )
+        elif choices_file and choices_file.exists():
+            print(f"📋 選択肢ファイルが見つかりました: {choices_file}")
+            try:
+                import json
+
+                with open(choices_file, "r") as f:
+                    choices_data = json.load(f)
+
+                message = choices_data.get("message", "どのようにしますか？")
+                suggestions = choices_data.get("suggestions", [])
+
+                suggestion_text = "\n".join(
+                    f"{s['id']}. {s['text']}" for s in suggestions
+                )
+
+                client.chat_update(
+                    channel=channel_id,
+                    ts=status_ts,
+                    text=(
+                        f"{message}\n\n"
+                        f"数字で選択してください:\n"
+                        f"{suggestion_text}\n\n"
+                        f"⏱️ 処理時間: {elapsed_str}"
+                    ),
+                )
+
+                # 新規スレッドの場合、ULIDを保存
+                if not is_continuation and latest_ulid:
+                    save_session_ulid(status_ts, latest_ulid)
+                    print(f"💾 セッション保存: {status_ts} → {latest_ulid}")
+            except Exception as e:
+                print(f"⚠️  選択肢表示でエラー: {e}")
         else:
             print(f"⚠️  結果ファイルが見つかりません")
             # メッセージ更新（警告）
@@ -329,6 +551,10 @@ def process_company_search(
 
     status_ts = status_msg["ts"]
 
+    # スレッド管理
+    is_continuation = thread_ts is not None
+    session_ulid = get_session_ulid(thread_ts) if is_continuation else None
+
     try:
         # スクリプトのパスを取得
         project_dir = Path(__file__).parent.parent.resolve()
@@ -343,14 +569,22 @@ def process_company_search(
 
         print(f"📝 スクリプト実行中: {company_script}")
         print(f"📄 ログファイル: {log_file}")
+        print(f"🔁 継続モード: {is_continuation}")
+        print(f"🆔 セッションULID: {session_ulid}")
         print(f"{'=' * 60}")
         print(f"OpenCode 実行ログ:")
         print(f"{'=' * 60}\n")
 
+        # コマンド構築
+        cmd = ["uv", "run", str(company_script), search_query, str(count)]
+        if is_continuation and session_ulid:
+            cmd.extend(["--continue", session_ulid])
+        print(f"🚀 実行コマンド: {' '.join(cmd)}")
+
         # 企業探索実行（標準出力・標準エラーをログファイルに保存）
         with open(log_file, "w", encoding="utf-8") as f:
             result = subprocess.run(
-                ["uv", "run", str(company_script), search_query, str(count)],
+                cmd,
                 cwd=str(project_dir),
                 stdout=f,
                 stderr=subprocess.STDOUT,
@@ -390,11 +624,13 @@ def process_company_search(
             [d for d in results_dir.iterdir() if d.is_dir()], reverse=True
         )
 
+        latest_ulid = None
         if not ulid_dirs:
             latest_summary = None
             latest_csv = None
         else:
             latest_dir = ulid_dirs[0]
+            latest_ulid = latest_dir.name
             latest_summary = latest_dir / "companies_summary.md"
             latest_csv = latest_dir / "companies.csv"
 
@@ -406,6 +642,11 @@ def process_company_search(
 
         summary_files = [latest_summary] if latest_summary else []
         csv_files = [latest_csv] if latest_csv else []
+
+        # choices.jsonチェック
+        choices_file = None
+        if latest_ulid:
+            choices_file = results_dir / latest_ulid / "choices.json"
 
         if summary_files and csv_files:
             latest_summary = summary_files[0]
@@ -475,6 +716,11 @@ def process_company_search(
 
                 print(f"✅ Slack投稿完了")
 
+                # 新規スレッドの場合、ULIDを保存
+                if not is_continuation and latest_ulid:
+                    save_session_ulid(status_ts, latest_ulid)
+                    print(f"💾 セッション保存: {status_ts} → {latest_ulid}")
+
             except Exception as post_error:
                 print(f"⚠️  Slack投稿でエラー: {post_error}")
                 import traceback
@@ -494,6 +740,38 @@ def process_company_search(
                         f"CSV: `{latest_csv.name}`"
                     ),
                 )
+        elif choices_file and choices_file.exists():
+            print(f"📋 選択肢ファイルが見つかりました: {choices_file}")
+            try:
+                import json
+
+                with open(choices_file, "r") as f:
+                    choices_data = json.load(f)
+
+                message = choices_data.get("message", "どのようにしますか？")
+                suggestions = choices_data.get("suggestions", [])
+
+                suggestion_text = "\n".join(
+                    f"{s['id']}. {s['text']}" for s in suggestions
+                )
+
+                client.chat_update(
+                    channel=channel_id,
+                    ts=status_ts,
+                    text=(
+                        f"{message}\n\n"
+                        f"数字で選択してください:\n"
+                        f"{suggestion_text}\n\n"
+                        f"⏱️ 処理時間: {elapsed_str}"
+                    ),
+                )
+
+                # 新規スレッドの場合、ULIDを保存
+                if not is_continuation and latest_ulid:
+                    save_session_ulid(status_ts, latest_ulid)
+                    print(f"💾 セッション保存: {status_ts} → {latest_ulid}")
+            except Exception as e:
+                print(f"⚠️  選択肢表示でエラー: {e}")
         else:
             print(f"⚠️  結果ファイルが見つかりません")
             # メッセージ更新（警告）
@@ -1008,19 +1286,25 @@ def handle_mention(event, say, logger, client):
     text = event.get("text", "").strip()
     user_id = event.get("user")
     channel_id = event.get("channel")
-    thread_ts = event.get(
-        "ts"
-    )  # このメッセージ自体のタイムスタンプ（スレッドの親になる）
+    message_ts = event.get("ts")  # このメッセージ自体のタイムスタンプ
+    thread_ts = event.get("thread_ts")  # スレッドの親タイムスタンプ（返信の場合のみ）
 
     print(f"📝 受信テキスト: {text}")
     print(f"👤 送信者: {user_id}")
     print(f"📍 チャンネル: {channel_id}")
-    print(f"🧵 スレッド: {thread_ts}")
+    print(f"🧵 スレッド親: {thread_ts}")
 
     # メンションを除去してコマンドを抽出
     import re
 
     command_text = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+
+    # スレッド返信の場合、数字のみなら選択肢処理
+    if thread_ts and command_text.isdigit():
+        choice_id = int(command_text)
+        print(f"🔢 選択肢受信: {choice_id}")
+        handle_choice_selection(choice_id, thread_ts, channel_id, user_id, client, say)
+        return
 
     # コマンドをパース
     parts = command_text.split()
@@ -1048,6 +1332,7 @@ def handle_mention(event, say, logger, client):
                 f"• `{bot_mention} job Pythonエンジニア` - キーワードから求人を探す\n"
                 f"• `{bot_mention} company SaaS系スタートアップ` - キーワードから企業を探す\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
+                f"• `{bot_mention} version` - バージョン情報確認\n"
                 f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードをリロード\n\n"
                 "*例:*\n"
@@ -1351,6 +1636,69 @@ def handle_mention(event, say, logger, client):
             channel=channel_id, thread_ts=thread_ts, text=response_text
         )
 
+    elif command == "version":
+        # バージョン確認
+        version_info = []
+
+        # Git情報を取得
+        try:
+            project_root = Path(__file__).parent.parent
+            git_result = subprocess.run(
+                ["git", "log", "-1", "--format=%H|%s|%ai"],
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+            if git_result.returncode == 0:
+                commit_hash, commit_msg, commit_date = git_result.stdout.strip().split(
+                    "|", 2
+                )
+                version_info.append(f"📌 最新コミット:")
+                version_info.append(f"   • Hash: `{commit_hash[:7]}`")
+                version_info.append(f"   • 日時: {commit_date}")
+                version_info.append(f"   • メッセージ: {commit_msg[:50]}...")
+            else:
+                version_info.append("⚠️ Git情報を取得できません")
+        except Exception as e:
+            version_info.append(f"⚠️ Gitエラー: {str(e)[:50]}")
+
+        # データ更新日時を取得
+        try:
+            data_dir = project_root / "workspace" / "data"
+            ndjson_files = list(data_dir.glob("*.ndjson"))
+
+            if ndjson_files:
+                # 最新のファイル更新日時を取得
+                latest_file = max(ndjson_files, key=lambda p: p.stat().st_mtime)
+                mtime = datetime.fromtimestamp(latest_file.stat().st_mtime)
+                version_info.append(
+                    f"\n📂 データ最終更新: {mtime.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                version_info.append(f"\n⚠️ データファイルが見つかりません")
+        except Exception as e:
+            version_info.append(f"\n⚠️ データ確認エラー: {str(e)[:50]}")
+
+        # Bot稼働時間を取得
+        uptime = (
+            datetime.now() - bot_start_time if "bot_start_time" in globals() else None
+        )
+        if uptime:
+            hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            version_info.append(f"⏱️  Bot稼働時間: {hours}時間{minutes}分")
+
+        response_text = (
+            f"📦 バージョン情報\n\n" + "\n".join(version_info) + "\n\n"
+            f"✅ 最新の状態です"
+        )
+
+        client.chat_postMessage(
+            channel=channel_id, thread_ts=thread_ts, text=response_text
+        )
+
     elif command == "test":
         # OpenCode疎通確認
         client.chat_postMessage(
@@ -1361,8 +1709,6 @@ def handle_mention(event, say, logger, client):
 
         try:
             # env.py の test_opencode() を使用
-            import sys
-
             env_path = Path(__file__).parent / "env.py"
             sys.path.insert(0, str(env_path.parent))
 
@@ -1422,6 +1768,7 @@ def handle_mention(event, say, logger, client):
                 f"• `{bot_mention} job <キーワード>` - キーワードから求人を探す\n"
                 f"• `{bot_mention} company <キーワード>` - キーワードから企業を探す\n"
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
+                f"• `{bot_mention} version` - バージョン情報確認\n"
                 f"• `{bot_mention} test` - OpenCode疎通テスト\n"
                 f"• `{bot_mention} reload` - コードリロード\n\n"
                 "*例:*\n"

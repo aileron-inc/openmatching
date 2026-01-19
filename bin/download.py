@@ -244,18 +244,96 @@ def to_ndjson(df, output_path):
     print(f"✅ 保存完了: {len(df)}件\n")
 
 
+def map_industry_to_english(industry: str) -> str:
+    """業種を英語にマッピング"""
+    if pd.isna(industry):
+        return "other"
+
+    industry_mapping = {
+        "人材": "human_resources",
+        "IT総合": "it_services",
+    }
+    return industry_mapping.get(industry, "other")
+
+
+def map_rank_to_english(rank: str) -> str:
+    """企業ランクを英語にマッピング"""
+    if pd.isna(rank):
+        return "unknown"
+
+    rank_mapping = {
+        "廃業": "defunct",
+        "関連会社": "affiliated",
+    }
+    return rank_mapping.get(rank, str(rank).upper())
+
+
+def split_and_save_ndjson(
+    df, output_dir, name_prefix, grouping_fields, has_industry=False
+):
+    """DataFrameを分割してNDJSON形式で保存"""
+    print(f"🔄 分割処理中: {name_prefix}")
+
+    df.columns = df.columns.str.strip()
+
+    if not grouping_fields:
+        print(f"  ❌ グルーピングフィールドが指定されていません")
+        return
+
+    if has_industry and len(grouping_fields) == 2:
+        industry_col = grouping_fields[0]
+        rank_col = grouping_fields[1]
+
+        df.loc[:, "mapped_industry"] = df[industry_col].apply(map_industry_to_english)
+        df.loc[:, "normalized_rank"] = df[rank_col].fillna("unknown").str.upper()
+
+        grouped = df.groupby(["mapped_industry", "normalized_rank"])
+
+        for (industry, rank), group in grouped:
+            if len(group) == 0:
+                continue
+
+            if rank == "defunct":
+                print(f"  📊 {industry}/{rank}: {len(group)}件 (スキップ)")
+                continue
+
+            filename = f"{name_prefix}_{industry}_{rank}.ndjson"
+            output_path = output_dir / filename
+
+            print(f"  📊 {industry}/{rank}: {len(group)}件")
+            to_ndjson(group, output_path)
+
+    else:
+        rank_col = grouping_fields[0]
+        df.loc[:, "normalized_rank"] = df[rank_col].fillna("unknown").str.upper()
+
+        grouped = df.groupby("normalized_rank")
+
+        for rank, group in grouped:
+            if len(group) == 0:
+                continue
+
+            filename = f"{name_prefix}_rank_{rank}.ndjson"
+            output_path = output_dir / filename
+
+            print(f"  📊 Rank {rank}: {len(group)}件")
+            to_ndjson(group, output_path)
+
+    print(f"✅ 分割完了\n")
+
+
 def main():
     """メイン処理"""
     project_root = Path(__file__).parent.parent
     tmp_dir = project_root / "tmp"
-    workspace_dir = project_root / "workspace"
+    data_dir = project_root / "workspace" / "data"
 
     # .env ファイル読み込み (.envがあれば読み込む。既存の環境変数は上書きしない)
     load_dotenv(dotenv_path=project_root / ".env", override=False)
 
     # ディレクトリ作成
     tmp_dir.mkdir(exist_ok=True)
-    workspace_dir.mkdir(exist_ok=True)
+    data_dir.mkdir(exist_ok=True)
 
     # 環境変数から設定を読み込み
     recent_interview_days = int(os.environ.get("RECENT_INTERVIEW_DAYS", "60"))
@@ -329,14 +407,18 @@ def main():
         min_survey_year=min_survey_year,
         valid_ranks=valid_ranks,
     )
-    to_ndjson(candidates_df, workspace_dir / "candidates.ndjson")
+    split_and_save_ndjson(
+        candidates_df, data_dir, "candidates", ["個人ユーザー/企業: 登録時ランク"]
+    )
 
     # 求人処理
     jobs_csv = tmp_dir / "求人票.csv"
     print("📖 求人RAWデータを読み込み中...")
     jobs_df = pd.read_csv(jobs_csv, encoding="utf-8-sig")
     jobs_df = filter_jobs(jobs_df, job_status=job_status)
-    to_ndjson(jobs_df, workspace_dir / "jobs.ndjson")
+    split_and_save_ndjson(
+        jobs_df, data_dir, "jobs", ["業種", "企業ランク"], has_industry=True
+    )
 
     # 企業処理（フィルタリングなし）
     companies_csv = tmp_dir / "企業.csv"
@@ -345,16 +427,17 @@ def main():
     companies_df.columns = companies_df.columns.str.strip()
     print(f"✅ 読み込み完了: {len(companies_df)}件")
     print()
-    to_ndjson(companies_df, workspace_dir / "companies.ndjson")
+    split_and_save_ndjson(
+        companies_df,
+        data_dir,
+        "companies",
+        ["業種", "企業ランク"],
+        has_industry=True,
+    )
 
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print("✅ 全て完了！")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print()
-    print("📂 出力先:")
-    print(f"  - {workspace_dir / 'candidates.ndjson'} ({len(candidates_df)}件)")
-    print(f"  - {workspace_dir / 'jobs.ndjson'} ({len(jobs_df)}件)")
-    print(f"  - {workspace_dir / 'companies.ndjson'} ({len(companies_df)}件)")
 
 
 if __name__ == "__main__":

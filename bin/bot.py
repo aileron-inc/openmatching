@@ -1263,6 +1263,87 @@ def run_download():
         print(f"{'=' * 60}\n")
 
 
+def run_download_with_reply(client, channel_id, thread_ts):
+    """download.pyを実行してSlackスレッドに結果を返信"""
+    start_time = time.time()
+    print(f"\n{'=' * 60}")
+    print(f"📥 手動実行: データダウンロード開始")
+    print(f"{'=' * 60}")
+    print(f"   開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    try:
+        project_dir = Path(__file__).parent.parent.resolve()
+        download_script = project_dir / "bin" / "download.py"
+
+        print(f"📝 スクリプト実行中: {download_script}")
+
+        result = subprocess.run(
+            ["uv", "run", str(download_script)],
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            timeout=3600,  # 1時間
+        )
+
+        elapsed_time = time.time() - start_time
+        elapsed_str = f"{int(elapsed_time // 60)}分{int(elapsed_time % 60)}秒"
+
+        print(f"⏱️  処理時間: {elapsed_str}")
+
+        if result.returncode == 0:
+            # 成功
+            print(f"✅ データダウンロード完了")
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=(
+                    f"✅ データダウンロード完了\n\n"
+                    f"⏰ 実行時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"⏱️ 処理時間: {elapsed_str}"
+                ),
+            )
+        else:
+            # 失敗
+            print(f"❌ データダウンロード失敗")
+            error_output = (
+                result.stderr[:1000] if result.stderr else result.stdout[:1000]
+            )
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=(
+                    f"❌ データダウンロード失敗\n\n"
+                    f"⏰ 実行時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"⏱️ 処理時間: {elapsed_str}\n\n"
+                    f"エラー内容:\n```\n{error_output}\n```"
+                ),
+            )
+
+    except subprocess.TimeoutExpired:
+        elapsed_time = time.time() - start_time
+        elapsed_str = f"{int(elapsed_time // 60)}分{int(elapsed_time % 60)}秒"
+        print(f"⏱️  タイムアウト（経過時間: {elapsed_str}）")
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text=f"⏱️ データダウンロードがタイムアウトしました（1時間超過）\n経過時間: {elapsed_str}",
+        )
+
+    except Exception as e:
+        print(f"❌ 予期しないエラー: {e}")
+        import traceback
+
+        traceback.print_exc()
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text=f"❌ データダウンロードで予期しないエラー:\n```\n{str(e)}\n```",
+        )
+
+    finally:
+        print(f"{'=' * 60}\n")
+
+
 def job_scheduler():
     """バックグラウンドスケジューラー（定期実行）"""
     # 毎日8時にダウンロード実行
@@ -1334,7 +1415,8 @@ def handle_mention(event, say, logger, client):
                 f"• `{bot_mention} ping` - Bot稼働状況確認\n"
                 f"• `{bot_mention} version` - バージョン情報確認\n"
                 f"• `{bot_mention} test` - OpenCode疎通テスト\n"
-                f"• `{bot_mention} reload` - コードをリロード\n\n"
+                f"• `{bot_mention} reload` - コードをリロード\n"
+                f"• `{bot_mention} download` - データを手動ダウンロード\n\n"
                 "*例:*\n"
                 f"• `{bot_mention} candidate J-0000024062`\n"
                 f"• `{bot_mention} job フルリモート`\n"
@@ -1554,6 +1636,24 @@ def handle_mention(event, say, logger, client):
             client.chat_postMessage(
                 channel=channel_id, thread_ts=thread_ts, text=f"❌ 更新エラー: {e}"
             )
+
+    elif command == "download":
+        # データダウンロード（手動実行）
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text="📥 データダウンロードを開始します...",
+        )
+
+        # ジョブキューに追加（他の処理と順番に実行）
+        job_queue.put(
+            {
+                "func": run_download_with_reply,
+                "args": (client, channel_id, thread_ts),
+                "kwargs": {},
+            }
+        )
+        print(f"✅ ダウンロードジョブをキューに追加（キュー: {job_queue.qsize()}件）")
 
     elif command == "ping":
         # ヘルスチェック
